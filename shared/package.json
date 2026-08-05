@@ -1,0 +1,13 @@
+{
+  "name": "@sg-reports/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./api.ts",
+  "exports": {
+    ".": "./api.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
