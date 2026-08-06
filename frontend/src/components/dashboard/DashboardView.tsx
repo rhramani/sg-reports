@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { Check, Clock3, Download, FileBarChart, FileSpreadsheet, Search } from "lucide-react";
+import { Check, ChevronRight, Clock3, Download, FileBarChart, FileSpreadsheet, Search } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { DashboardSummary, ReportItem } from "@shared/api";
-import { authFetch } from "@/lib/apiClient";
+import { authFetch, getAuthUser } from "@/lib/apiClient";
 
 export function DashboardView() {
+  const user = getAuthUser();
+  const formattedName = user?.name || "User";
+
   const [period, setPeriod] = useState("Month");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
@@ -69,7 +72,7 @@ export function DashboardView() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `nexora-reports-${period.toLowerCase()}.csv`;
+    anchor.download = `sg-report-reports-${period.toLowerCase()}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
     setNotice(`${filteredRows.length} filtered reports exported`);
@@ -80,13 +83,14 @@ export function DashboardView() {
     <div className="mx-auto max-w-[1500px] px-5 py-7 sm:px-8 lg:px-10">
       <div className="mb-7 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
         <div>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[#18476A]">
-            REPORT DATA SUMMARY
-          </p>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-950">Report dashboard</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Review report records and download the exact period you need.
-          </p>
+          <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+            <span>Main menu</span>
+            <ChevronRight size={12} />
+            <span className="text-slate-600">Dashboard</span>
+          </div>
+          <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-slate-950">
+            Welcome, {formattedName}
+          </h1>
         </div>
         <button
           onClick={exportReport}

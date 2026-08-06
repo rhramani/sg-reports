@@ -3,13 +3,29 @@ import { AuthRequest, authorizeRoles } from "../middleware/auth";
 import { AuditLogModel, inMemoryAuditLogs } from "../models/AuditLog";
 import { logActivity } from "../utils/auditLogger";
 import { getDBStatus } from "../db";
-import { AuditLogItem, AuditLogMetrics, AuditLogResponse } from "@shared/api";
+import { AuditSessionLog, AuditLogMetrics, AuditLogResponse } from "@shared/api";
 
 export const auditLogsRouter = Router();
 
+function calculateDuration(loginIso: string | Date, logoutIso?: string | Date | null): string {
+  const start = new Date(loginIso).getTime();
+  if (isNaN(start)) return "Active session";
+  if (!logoutIso) return "Active session";
+  const end = new Date(logoutIso).getTime();
+  if (isNaN(end) || end < start) return "Active session";
+  const diffSec = Math.floor((end - start) / 1000);
+  if (diffSec < 60) return `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  const secs = diffSec % 60;
+  if (mins < 60) return `${mins}m ${secs}s`;
+  const hrs = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return `${hrs}h ${remMins}m`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/audit-logs
-// Super Admin only. Fetches searchable, filterable, paginated audit logs.
+// Super Admin only. Fetches searchable, filterable, paginated audit session logs.
 // ─────────────────────────────────────────────────────────────────────────────
 auditLogsRouter.get(
   "/",
@@ -26,35 +42,34 @@ auditLogsRouter.get(
       const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string || "15", 10)));
 
       const dbStatus = getDBStatus();
-      let logs: AuditLogItem[] = [];
+      let sessionLogs: AuditSessionLog[] = [];
       let totalCount = 0;
 
       if (dbStatus.stateCode === 1) {
         // Query MongoDB
         const query: Record<string, unknown> = {};
 
-        if (moduleFilter && moduleFilter !== "All") {
-          query.module = moduleFilter;
-        }
-
-        if (actionFilter && actionFilter !== "All") {
-          query.action = actionFilter;
-        }
-
         if (roleFilter && roleFilter !== "All") {
           query.userRole = roleFilter;
         }
 
+        if (moduleFilter && moduleFilter !== "All") {
+          query["timeline.module"] = moduleFilter;
+        }
+
+        if (actionFilter && actionFilter !== "All") {
+          query["timeline.action"] = actionFilter;
+        }
+
         if (startDate || endDate) {
-          query.timestamp = {};
+          query.loginTime = {};
           if (startDate) {
-            (query.timestamp as Record<string, unknown>).$gte = new Date(startDate);
+            (query.loginTime as Record<string, unknown>).$gte = new Date(startDate);
           }
           if (endDate) {
-            // Include end of day
             const end = new Date(endDate);
             end.setHours(23, 59, 59, 999);
-            (query.timestamp as Record<string, unknown>).$lte = end;
+            (query.loginTime as Record<string, unknown>).$lte = end;
           }
         }
 
@@ -63,76 +78,97 @@ auditLogsRouter.get(
           query.$or = [
             { userName: searchRegex },
             { userEmail: searchRegex },
-            { module: searchRegex },
-            { section: searchRegex },
-            { action: searchRegex },
+            { userRole: searchRegex },
             { ipAddress: searchRegex },
-            { details: searchRegex },
+            { userAgent: searchRegex },
+            { "timeline.module": searchRegex },
+            { "timeline.section": searchRegex },
+            { "timeline.action": searchRegex },
+            { "timeline.details": searchRegex },
           ];
         }
 
         totalCount = await AuditLogModel.countDocuments(query);
         const docs = await AuditLogModel.find(query)
-          .sort({ timestamp: -1 })
+          .sort({ loginTime: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
           .lean();
 
-        logs = docs.map((doc) => ({
-          id: String(doc._id),
-          _id: String(doc._id),
-          userName: doc.userName,
-          userEmail: doc.userEmail,
-          userRole: doc.userRole,
-          module: doc.module,
-          section: doc.section,
-          action: doc.action,
-          timestamp: doc.timestamp instanceof Date ? doc.timestamp.toISOString() : String(doc.timestamp),
-          ipAddress: doc.ipAddress || "127.0.0.1",
-          details: doc.details || "",
-        }));
+        sessionLogs = docs.map((doc) => {
+          const loginIso = doc.loginTime instanceof Date ? doc.loginTime.toISOString() : String(doc.loginTime);
+          const logoutIso = doc.logoutTime ? (doc.logoutTime instanceof Date ? doc.logoutTime.toISOString() : String(doc.logoutTime)) : null;
+
+          return {
+            id: String(doc._id),
+            _id: String(doc._id),
+            sessionId: doc.sessionId,
+            userName: doc.userName,
+            userEmail: doc.userEmail,
+            userRole: doc.userRole,
+            loginTime: loginIso,
+            logoutTime: logoutIso,
+            status: doc.status || (logoutIso ? "Completed" : "Active"),
+            duration: calculateDuration(loginIso, logoutIso),
+            ipAddress: doc.ipAddress || "127.0.0.1",
+            userAgent: doc.userAgent || "Browser Client",
+            totalActions: doc.timeline ? doc.timeline.length : (doc.totalActions || 1),
+            timeline: (doc.timeline || []).map((t, idx) => ({
+              id: String(t._id || `t_${idx}`),
+              timestamp: t.timestamp instanceof Date ? t.timestamp.toISOString() : String(t.timestamp),
+              module: t.module,
+              section: t.section,
+              action: t.action,
+              details: t.details || "",
+            })),
+          };
+        });
       } else {
         // Fallback filtering in memory
         let filtered = [...inMemoryAuditLogs];
-
-        if (moduleFilter && moduleFilter !== "All") {
-          filtered = filtered.filter((l) => l.module === moduleFilter);
-        }
-
-        if (actionFilter && actionFilter !== "All") {
-          filtered = filtered.filter((l) => l.action === actionFilter);
-        }
 
         if (roleFilter && roleFilter !== "All") {
           filtered = filtered.filter((l) => l.userRole === roleFilter);
         }
 
+        if (moduleFilter && moduleFilter !== "All") {
+          filtered = filtered.filter((l) => l.timeline.some((t) => t.module === moduleFilter));
+        }
+
+        if (actionFilter && actionFilter !== "All") {
+          filtered = filtered.filter((l) => l.timeline.some((t) => t.action === actionFilter));
+        }
+
         if (startDate) {
           const startMs = new Date(startDate).getTime();
-          filtered = filtered.filter((l) => new Date(l.timestamp).getTime() >= startMs);
+          filtered = filtered.filter((l) => new Date(l.loginTime).getTime() >= startMs);
         }
 
         if (endDate) {
           const end = new Date(endDate);
           end.setHours(23, 59, 59, 999);
           const endMs = end.getTime();
-          filtered = filtered.filter((l) => new Date(l.timestamp).getTime() <= endMs);
+          filtered = filtered.filter((l) => new Date(l.loginTime).getTime() <= endMs);
         }
 
         if (search) {
           filtered = filtered.filter((l) => {
-            const text = `${l.userName} ${l.userEmail} ${l.module} ${l.section} ${l.action} ${l.ipAddress || ""} ${l.details || ""}`.toLowerCase();
+            const timelineText = l.timeline.map((t) => `${t.module} ${t.section} ${t.action} ${t.details || ""}`).join(" ");
+            const text = `${l.userName} ${l.userEmail} ${l.userRole} ${l.ipAddress || ""} ${l.userAgent || ""} ${timelineText}`.toLowerCase();
             return text.includes(search);
           });
         }
 
         totalCount = filtered.length;
-        logs = filtered.slice((page - 1) * limit, page * limit);
+        sessionLogs = filtered.slice((page - 1) * limit, page * limit).map((l) => ({
+          ...l,
+          duration: calculateDuration(l.loginTime, l.logoutTime),
+        }));
       }
 
       // Compute Summary Metrics
       const allLogsSource = dbStatus.stateCode === 1 ? await AuditLogModel.find({}).lean() : inMemoryAuditLogs;
-      
+
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
@@ -140,15 +176,19 @@ auditLogsRouter.get(
       const moduleCounts: Record<string, number> = {};
       let securityEventsCount = 0;
 
-      allLogsSource.forEach((log) => {
-        const logDate = new Date(log.timestamp);
-        if (logDate >= todayStart) {
-          activeUsersSet.add(log.userEmail);
+      allLogsSource.forEach((sess) => {
+        const loginDate = new Date(sess.loginTime);
+        if (loginDate >= todayStart) {
+          activeUsersSet.add(sess.userEmail);
         }
-        moduleCounts[log.module] = (moduleCounts[log.module] || 0) + 1;
-        if (log.action === "Login" || log.action === "Logout") {
-          securityEventsCount++;
-        }
+
+        const actionsList = (sess.timeline || []) as { module: string; action: string }[];
+        actionsList.forEach((act) => {
+          moduleCounts[act.module] = (moduleCounts[act.module] || 0) + 1;
+          if (act.action === "Login" || act.action === "Logout") {
+            securityEventsCount++;
+          }
+        });
       });
 
       let topModule = "None";
@@ -161,7 +201,7 @@ auditLogsRouter.get(
       });
 
       const metrics: AuditLogMetrics = {
-        totalLogs: dbStatus.stateCode === 1 ? await AuditLogModel.countDocuments({}) : inMemoryAuditLogs.length,
+        totalLogs: totalCount,
         activeUsersToday: activeUsersSet.size,
         topModule,
         securityEvents: securityEventsCount,
@@ -171,7 +211,7 @@ auditLogsRouter.get(
 
       const response: AuditLogResponse = {
         success: true,
-        data: logs,
+        data: sessionLogs,
         total: totalCount,
         page,
         pages,
@@ -183,7 +223,7 @@ auditLogsRouter.get(
       console.error("Error in GET /api/audit-logs:", err);
       return res.status(500).json({
         success: false,
-        error: "Failed to retrieve activity log records.",
+        error: "Failed to retrieve activity session logs.",
       });
     }
   }

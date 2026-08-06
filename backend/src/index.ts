@@ -15,6 +15,7 @@ import { usersRouter } from "./routes/users";
 import { rolesRouter } from "./routes/roles";
 import { reportTypesRouter } from "./routes/reportTypes";
 import { auditLogsRouter } from "./routes/auditLogs";
+import { profileRouter } from "./routes/profile";
 import { authenticateToken } from "./middleware/auth";
 
 export function createServer() {
@@ -47,6 +48,7 @@ export function createServer() {
 
   // Modular Routers for all UI features
   app.use("/api/auth", authRouter);
+  app.use("/api/profile", authenticateToken, profileRouter);
   app.use("/api/reports", authenticateToken, reportsRouter);
   app.use("/api/dashboard", authenticateToken, dashboardRouter);
   app.use("/api/approvals", authenticateToken, approvalsRouter);

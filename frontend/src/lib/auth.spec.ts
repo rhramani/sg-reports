@@ -11,6 +11,7 @@ import {
   AUTH_USER_KEY,
   AUTH_FLAG_KEY,
 } from "./apiClient";
+import { secureLocalStorage } from "./secureStorage";
 import { UserSession } from "@shared/api";
 
 function createLocalStorageMock() {
@@ -83,7 +84,7 @@ describe("Authentication & Authorization Utilities", () => {
     expect(validation.reason).toContain("Token expired");
   });
 
-  it("should store session and pass isTokenValid with valid JWT", () => {
+  it("should store session in encrypted format and pass isTokenValid with valid JWT", () => {
     const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
     const validJwt = createDummyJwt({
       email: "test.admin@nexora.com",
@@ -101,10 +102,22 @@ describe("Authentication & Authorization Utilities", () => {
 
     setAuthSession(validJwt, mockUser);
 
+    // Verify getters return decrypted data
     expect(getAuthToken()).toBe(validJwt);
     expect(getAuthUser()).toEqual(mockUser);
-    expect(localStorage.getItem(AUTH_FLAG_KEY)).toBe("true");
+    expect(secureLocalStorage.getItem(AUTH_FLAG_KEY)).toBe("true");
     expect(isTokenValid()).toBe(true);
+
+    // Verify raw browser localStorage contains encrypted ciphertext
+    const rawToken = localStorage.getItem(AUTH_TOKEN_KEY);
+    expect(rawToken).not.toBeNull();
+    expect(rawToken).not.toBe(validJwt);
+    expect(rawToken).toContain("ENC::v1::");
+
+    const rawUser = localStorage.getItem(AUTH_USER_KEY);
+    expect(rawUser).not.toBeNull();
+    expect(rawUser).not.toBe(JSON.stringify(mockUser));
+    expect(rawUser).toContain("ENC::v1::");
   });
 
   it("should clear session completely on logout", () => {

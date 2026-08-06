@@ -6,11 +6,11 @@ import { UserModel } from "../models/User";
 import { RoleModel } from "../models/Role";
 import { getDefaultModulePermissions } from "./roles";
 import { getDBStatus } from "../db";
-import { logActivity } from "../utils/auditLogger";
+import { logActivity, startUserSession, endUserSession } from "../utils/auditLogger";
 
 export const authRouter = Router();
 
-export function getDefaultSuperAdmin() {
+function getDefaultSuperAdmin() {
   return {
     name: process.env.SUPER_ADMIN_NAME || "Super Administrator",
     email: process.env.SUPER_ADMIN_EMAIL || "superadmin@nexora.com",
@@ -136,6 +136,15 @@ authRouter.post("/login", async (req, res) => {
       email: dbUser.email,
       name: dbUser.name,
       role: dbUser.role,
+      mobileNumber: dbUser.mobileNumber || "",
+      department: dbUser.department || "",
+      avatar: dbUser.avatar || "",
+      bio: dbUser.bio || "",
+      notifications: dbUser.notifications || {
+        emailAlerts: true,
+        approvalReminders: true,
+        weeklyDigest: false,
+      },
       modulePermissions,
       authenticatedAt: new Date().toISOString(),
     };
@@ -143,14 +152,10 @@ authRouter.post("/login", async (req, res) => {
     const { token, expiresAt } = generateToken(baseUser);
     const user: UserSession = { ...baseUser, expiresAt };
 
-    await logActivity(req, {
-      userName: dbUser.name,
-      userEmail: dbUser.email,
-      userRole: dbUser.role,
-      module: "Auth",
-      section: "Login Screen",
-      action: "Login",
-      details: `${dbUser.name} signed in successfully.`,
+    await startUserSession(req, {
+      name: dbUser.name,
+      email: dbUser.email,
+      role: dbUser.role,
     });
 
     const response: LoginResponse = {
@@ -177,12 +182,7 @@ authRouter.post("/login", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 authRouter.post("/logout", authenticateToken, async (req: AuthRequest, res) => {
   if (req.user) {
-    await logActivity(req, {
-      module: "Auth",
-      section: "User Session",
-      action: "Logout",
-      details: `${req.user.name} logged out.`,
-    });
+    await endUserSession(req, req.user);
   }
   return res.json({ success: true, message: "Logged out successfully." });
 });
@@ -195,22 +195,41 @@ authRouter.get("/me", authenticateToken, async (req: AuthRequest, res) => {
     return res.status(401).json({ success: false, error: "Unauthorized" });
   }
 
-  let modulePermissions = req.user.modulePermissions;
+  let dbUser = null;
   try {
-    const roleDoc = await RoleModel.findOne({ role: req.user.role });
+    dbUser = await UserModel.findOne({ email: req.user.email.toLowerCase() }).select("-password");
+  } catch (err) {
+    console.error("Error fetching db user in /me:", err);
+  }
+
+  let modulePermissions = req.user.modulePermissions;
+  const currentRole = dbUser?.role || req.user.role;
+  try {
+    const roleDoc = await RoleModel.findOne({ role: currentRole });
     if (roleDoc && roleDoc.modulePermissions && roleDoc.modulePermissions.length > 0) {
       modulePermissions = roleDoc.modulePermissions;
     } else {
-      modulePermissions = getDefaultModulePermissions(req.user.role);
+      modulePermissions = getDefaultModulePermissions(currentRole);
     }
   } catch {
-    modulePermissions = getDefaultModulePermissions(req.user.role);
+    modulePermissions = getDefaultModulePermissions(currentRole);
   }
 
   res.json({
     success: true,
     user: {
       ...req.user,
+      name: dbUser?.name || req.user.name,
+      role: currentRole,
+      mobileNumber: dbUser?.mobileNumber ?? req.user.mobileNumber ?? "",
+      department: dbUser?.department ?? req.user.department ?? "",
+      avatar: dbUser?.avatar ?? req.user.avatar ?? "",
+      bio: dbUser?.bio ?? req.user.bio ?? "",
+      notifications: dbUser?.notifications ?? req.user.notifications ?? {
+        emailAlerts: true,
+        approvalReminders: true,
+        weeklyDigest: false,
+      },
       modulePermissions,
     },
     message: "Active session verified",

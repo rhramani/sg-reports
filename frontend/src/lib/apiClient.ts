@@ -1,4 +1,5 @@
 import { UserSession } from "@shared/api";
+import { secureLocalStorage } from "./secureStorage";
 
 export const AUTH_TOKEN_KEY = "nexora-token";
 export const AUTH_USER_KEY = "nexora-user";
@@ -80,13 +81,11 @@ export function validateToken(token: string | null): { valid: boolean; reason?: 
 }
 
 export function getAuthToken(): string | null {
-  if (typeof localStorage === "undefined") return null;
-  return localStorage.getItem(AUTH_TOKEN_KEY);
+  return secureLocalStorage.getItem(AUTH_TOKEN_KEY);
 }
 
 export function getAuthUser(): UserSession | null {
-  if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(AUTH_USER_KEY);
+  const raw = secureLocalStorage.getItem(AUTH_USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as UserSession;
@@ -113,39 +112,15 @@ export function isTokenValid(): boolean {
 }
 
 export function setAuthSession(token: string, user: UserSession) {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
-  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-  localStorage.setItem(AUTH_FLAG_KEY, "true");
+  secureLocalStorage.setItem(AUTH_TOKEN_KEY, token);
+  secureLocalStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  secureLocalStorage.setItem(AUTH_FLAG_KEY, "true");
 }
 
 export function clearAuthSession() {
-  if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(AUTH_TOKEN_KEY);
-  localStorage.removeItem(AUTH_USER_KEY);
-  localStorage.removeItem(AUTH_FLAG_KEY);
-}
-
-export async function verifyServerSession(): Promise<boolean> {
-  const token = getAuthToken();
-  if (!isTokenValid() || !token) {
-    clearAuthSession();
-    return false;
-  }
-
-  try {
-    const res = await fetch("/api/auth/me", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return Boolean(data.success);
-    }
-    clearAuthSession();
-    return false;
-  } catch {
-    return isTokenValid();
-  }
+  secureLocalStorage.removeItem(AUTH_TOKEN_KEY);
+  secureLocalStorage.removeItem(AUTH_USER_KEY);
+  secureLocalStorage.removeItem(AUTH_FLAG_KEY);
 }
 
 export async function authFetch(

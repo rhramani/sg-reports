@@ -26,6 +26,7 @@ import {
   SlidersHorizontal,
   Trash2,
   ToggleLeft,
+  User,
   UserPlus,
   Users,
   X,
@@ -35,12 +36,14 @@ import { DashboardView } from "@/components/dashboard/DashboardView";
 import { DynamicReportViewer } from "@/components/dashboard/DynamicReportViewer";
 import { PermissionsView } from "@/components/dashboard/PermissionsView";
 import { AuditLogView } from "@/components/dashboard/AuditLogView";
+import { ProfileView } from "@/components/profile/ProfileView";
+import { SGReportLogo } from "@/components/SGReportLogo";
 import { authFetch, getAuthUser, clearAuthSession } from "@/lib/apiClient";
 import type { PermissionActions } from "@shared/api";
 
 const navGroups = [
   {
-    label: "Workspace",
+    label: "Main menu",
     items: [
       { label: "Dashboard", icon: LayoutDashboard },
       { label: "Reports", icon: FileBarChart },
@@ -53,7 +56,6 @@ const navGroups = [
       { label: "Users", icon: Users },
       { label: "Roles", icon: Shield },
       { label: "Permissions", icon: ShieldCheck },
-      { label: "Activity Log", icon: Clock3 },
       { label: "Report types", icon: FileSpreadsheet },
     ],
   },
@@ -112,7 +114,7 @@ const moduleConfig: Record<
   },
   "Report types": {
     eyebrow: "REPORT CATALOG",
-    description: "Configure reusable report categories and the fields your teams work with.",
+    description: "Report categories are automatically created and kept in sync with uploaded reports.",
     action: "Add report type",
     icon: FileSpreadsheet,
     endpoint: "/api/report-types",
@@ -249,8 +251,8 @@ function ModulePage({
     };
   }, []);
 
-  // ── Fetch roles from /api/roles for the dropdown ──────────────────────────
-  useEffect(() => {
+  // ── Fetch roles from /api/roles for dropdowns dynamically ──────────────────
+  const fetchDynamicRoles = () => {
     setRolesLoading(true);
     authFetch("/api/roles")
       .then(async (res) => {
@@ -262,19 +264,14 @@ function ModulePage({
           const names: string[] = res.data.map((r: { role: string }) => r.role);
           setAvailableRoles(names);
           setUserRole((prev) => (prev && names.includes(prev) ? prev : names[0]));
-        } else {
-          // Fallback defaults if backend returns nothing
-          const defaults = ["Report Analyst", "Audit Supervisor", "Viewer", "Super Admin"];
-          setAvailableRoles(defaults);
-          setUserRole(defaults[0]);
         }
       })
-      .catch(() => {
-        const defaults = ["Report Analyst", "Audit Supervisor", "Viewer", "Super Admin"];
-        setAvailableRoles(defaults);
-        setUserRole(defaults[0]);
-      })
+      .catch(() => {})
       .finally(() => setRolesLoading(false));
+  };
+
+  useEffect(() => {
+    fetchDynamicRoles();
   }, []);
 
   const fetchModuleData = () => {
@@ -425,6 +422,7 @@ function ModulePage({
         trigger(data.message || "Updated successfully.");
         setShowEdit(false);
         fetchModuleData();
+        if (module === "Roles") fetchDynamicRoles();
       } else {
         setEditError(data.error || "Update failed.");
       }
@@ -453,6 +451,7 @@ function ModulePage({
       if (data.success) {
         trigger(data.message || `Status updated to ${newStatus}.`);
         fetchModuleData();
+        if (module === "Roles") fetchDynamicRoles();
       } else {
         trigger(data.error || "Status toggle failed.");
       }
@@ -477,6 +476,7 @@ function ModulePage({
         trigger(data.message || "Deleted successfully.");
         setShowDelete(false);
         fetchModuleData();
+        if (module === "Roles") fetchDynamicRoles();
       } else {
         trigger(data.error || "Delete failed.");
         setShowDelete(false);
@@ -549,7 +549,7 @@ function ModulePage({
         bodyData = { report: itemName.trim(), submittedBy: "Admin", priority: "Medium" };
       } else if (module === "Reports") {
         postUrl = "/api/reports";
-        bodyData = { name: itemName.trim(), type: itemDetail.trim() || "Dynamic Report", owner: "Admin" };
+        bodyData = { name: itemName.trim(), type: itemName.trim(), owner: "Admin" };
       }
 
       const res = await authFetch(postUrl, {
@@ -571,6 +571,7 @@ function ModulePage({
         setItemDetail("");
         setShowCreate(false);
         fetchModuleData();
+        if (module === "Roles") fetchDynamicRoles();
       } else {
         trigger(data.error || `${module} operation failed`);
       }
@@ -582,15 +583,19 @@ function ModulePage({
 
   const hasRowActions = permissions.update || permissions.delete;
 
+  const isAdminModule = ["Users", "Roles", "Permissions", "Activity Log", "Report types"].includes(module);
+  const categoryLabel = isAdminModule ? "Administration" : "Main menu";
+
   return (
     <div className="mx-auto max-w-[1500px] px-5 py-7 sm:px-8 lg:px-10">
       <div className="mb-7 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
         <div>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[#18476A]">
-            {config.eyebrow}
-          </p>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-950">{module}</h2>
-          <p className="mt-1 max-w-2xl text-sm text-slate-500">{config.description}</p>
+          <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+            <span>{categoryLabel}</span>
+            <ChevronRight size={12} />
+            <span className="text-slate-600">{module}</span>
+          </div>
+          <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-slate-950">{module}</h1>
         </div>
         {permissions.add && (
           <button
@@ -624,9 +629,6 @@ function ModulePage({
         <div className="flex flex-col justify-between gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:p-6">
           <div>
             <h3 className="text-sm font-bold text-slate-900">{module} directory</h3>
-            <p className="mt-1 text-xs text-slate-400">
-              Search, filter, export, and manage workspace data.
-            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <div className="relative">
@@ -660,7 +662,7 @@ function ModulePage({
                   const url = URL.createObjectURL(blob);
                   const anchor = document.createElement("a");
                   anchor.href = url;
-                  anchor.download = `nexora-${module.toLowerCase().replace(/\s+/g, "-")}.csv`;
+                  anchor.download = `sg-report-${module.toLowerCase().replace(/\s+/g, "-")}.csv`;
                   anchor.click();
                   URL.revokeObjectURL(url);
                   trigger(`Exported ${filteredRows.length} records to CSV`);
@@ -826,7 +828,7 @@ function ModulePage({
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#18476A]">Nexora workspace</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#18476A]">SG Report workspace</p>
                 <h3 className="mt-1 text-lg font-bold flex items-center gap-2">
                   <Pencil size={17} className="text-[#18476A]" />
                   Edit {module === "Roles" ? "role" : module === "Report types" ? "report type" : module.toLowerCase().replace(/ &.*/, "").trim()}
@@ -936,7 +938,7 @@ function ModulePage({
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#18476A]">
-                  Nexora workspace
+                  SG Report workspace
                 </p>
                 <h3 className="mt-1 text-lg font-bold flex items-center gap-2">
                   <UserPlus size={18} className="text-[#18476A]" />
@@ -1049,7 +1051,7 @@ function ModulePage({
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#18476A]">
-                  Nexora workspace
+                  SG Report workspace
                 </p>
                 <h3 className="mt-1 text-lg font-bold">{config.action}</h3>
               </div>
@@ -1111,23 +1113,34 @@ export default function Index() {
   const [query, setQuery] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [userPermissions, setUserPermissions] = useState<Record<string, PermissionActions>>({});
+  const [currentUser, setCurrentUser] = useState(getAuthUser());
+  const [profileTab, setProfileTab] = useState<"details" | "security">("details");
 
-  const currentUser = getAuthUser();
-  const currentUserEmail = currentUser?.email || "admin@nexora.com";
+  const currentUserEmail = currentUser?.email || "admin@sgreport.com";
   const userRole = currentUser?.role || "Report Analyst";
   const formattedName = currentUser?.name || (currentUserEmail.split("@")[0] ? currentUserEmail.split("@")[0].charAt(0).toUpperCase() + currentUserEmail.split("@")[0].slice(1) : "User");
-  const namePart = formattedName;
+  const avatarUrl = currentUser?.avatar || "";
+
+  const refreshUserSession = () => {
+    const user = getAuthUser();
+    if (user) {
+      setCurrentUser(user);
+      if (Array.isArray(user.modulePermissions)) {
+        const map: Record<string, PermissionActions> = {};
+        user.modulePermissions.forEach((mp) => {
+          if (mp.module && mp.actions) map[mp.module] = mp.actions;
+        });
+        setUserPermissions(map);
+      }
+    }
+  };
 
   useEffect(() => {
-    // Read cached permissions from session first
-    const user = getAuthUser();
-    if (user && Array.isArray(user.modulePermissions)) {
-      const map: Record<string, PermissionActions> = {};
-      user.modulePermissions.forEach((mp) => {
-        if (mp.module && mp.actions) map[mp.module] = mp.actions;
-      });
-      setUserPermissions(map);
-    }
+    refreshUserSession();
+
+    // Event listener for profile update broadcasts
+    const handleProfileUpdated = () => refreshUserSession();
+    window.addEventListener("profile-updated", handleProfileUpdated);
 
     // Refresh active session and live permissions from server
     authFetch("/api/auth/me")
@@ -1136,18 +1149,28 @@ export default function Index() {
         return null;
       })
       .then((res) => {
-        if (res && res.success && res.user && Array.isArray(res.user.modulePermissions)) {
-          const map: Record<string, PermissionActions> = {};
-          res.user.modulePermissions.forEach((mp: { module: string; actions: PermissionActions }) => {
-            if (mp.module && mp.actions) map[mp.module] = mp.actions;
-          });
-          setUserPermissions(map);
+        if (res && res.success && res.user) {
+          setCurrentUser(res.user);
+          if (Array.isArray(res.user.modulePermissions)) {
+            const map: Record<string, PermissionActions> = {};
+            res.user.modulePermissions.forEach((mp: { module: string; actions: PermissionActions }) => {
+              if (mp.module && mp.actions) map[mp.module] = mp.actions;
+            });
+            setUserPermissions(map);
+          }
         }
       })
       .catch(() => {});
+
+    return () => {
+      window.removeEventListener("profile-updated", handleProfileUpdated);
+    };
   }, []);
 
   const getPermissionsForModule = (moduleName: string): PermissionActions => {
+    if (moduleName === "Profile") {
+      return { view: true, add: true, update: true, delete: false, export: false };
+    }
     // The "Permissions" and "Activity Log" tabs are strictly restricted to Super Admin only
     if (moduleName === "Permissions" || moduleName === "Activity Log") {
       const isSuper = userRole === "Super Admin";
@@ -1191,10 +1214,18 @@ export default function Index() {
     }))
     .filter((group) => group.items.length > 0);
 
-  const allPermittedModules = visibleNavGroups.flatMap((g) => g.items.map((i) => i.label));
+  const allPermittedModules = [
+    ...visibleNavGroups.flatMap((g) => g.items.map((i) => i.label)),
+    ...(getPermissionsForModule("Activity Log").view ? ["Activity Log"] : []),
+  ];
 
   useEffect(() => {
-    if (allPermittedModules.length > 0 && !allPermittedModules.includes(activeNav)) {
+    if (
+      allPermittedModules.length > 0 &&
+      !allPermittedModules.includes(activeNav) &&
+      activeNav !== "Profile" &&
+      activeNav !== "Activity Log"
+    ) {
       setActiveNav(allPermittedModules[0]);
     }
   }, [userPermissions, activeNav]);
@@ -1213,29 +1244,18 @@ export default function Index() {
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex h-[76px] items-center justify-between border-b border-white/10 px-6">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#6fa6c4] shadow-lg shadow-[#18476A]/30">
-              <BarChart3 size={19} strokeWidth={2.5} />
-            </div>
-            <div>
-              <p className="text-[15px] font-bold tracking-tight">Nexora</p>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#b4d4e4]/60">
-                Intelligence Suite
-              </p>
-            </div>
+        <div className="flex h-[84px] items-center justify-between border-b border-white/10 px-5 py-3">
+          <div className="flex-1 flex items-center overflow-hidden pr-2">
+            <SGReportLogo size="full" variant="light" className="w-full" />
           </div>
           <button
-            className="rounded-lg p-1 text-white/50 hover:bg-white/10 hover:text-white lg:hidden"
+            className="rounded-lg p-1 text-white/50 hover:bg-white/10 hover:text-white lg:hidden shrink-0"
             onClick={() => setSidebarOpen(false)}
           >
             <X size={18} />
           </button>
         </div>
         <div className="px-4 pt-7">
-          <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">
-            Main menu
-          </p>
           {visibleNavGroups.map((group) => (
             <div key={group.label} className="mb-7">
               <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">
@@ -1270,11 +1290,30 @@ export default function Index() {
             </div>
           ))}
         </div>
-        <div className="mt-auto p-4">
-          <button className="mt-4 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[12px] text-white/50 hover:bg-white/5 hover:text-white">
-            <Settings2 size={16} />
-            Workspace settings
-          </button>
+        <div className="mt-auto p-4 border-t border-white/10">
+          {getPermissionsForModule("Activity Log").view && (
+            <button
+              onClick={() => {
+                setActiveNav("Activity Log");
+                setSidebarOpen(false);
+              }}
+              className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition ${
+                activeNav === "Activity Log"
+                  ? "bg-[#18476A] text-white shadow-[inset_3px_0_0_#18476A]"
+                  : "text-white/55 hover:bg-white/5 hover:text-white"
+              }`}
+            >
+              <span className="flex items-center gap-3">
+                <Clock3
+                  size={17}
+                  className={
+                    activeNav === "Activity Log" ? "text-white" : "text-white/40 group-hover:text-white/70"
+                  }
+                />
+                Audit Logs
+              </span>
+            </button>
+          )}
         </div>
       </aside>
 
@@ -1287,16 +1326,6 @@ export default function Index() {
             >
               <Menu size={20} />
             </button>
-            <div>
-              <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
-                <span>Workspace</span>
-                <ChevronRight size={12} />
-                <span className="text-slate-600">{activeNav}</span>
-              </div>
-              <h1 className="mt-0.5 text-[19px] font-bold tracking-tight text-slate-900">
-                {activeNav === "Dashboard" ? `Welcome, ${formattedName}` : activeNav}
-              </h1>
-            </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
             <button
@@ -1314,8 +1343,12 @@ export default function Index() {
                 onClick={() => setProfileOpen(!profileOpen)}
                 className="flex items-center gap-2 rounded-xl p-1.5 pr-2 hover:bg-slate-50"
               >
-                <div className="grid h-8 w-8 place-items-center rounded-full bg-[#18476A] text-xs font-bold text-white">
-                  {namePart.substring(0, 2).toUpperCase()}
+                <div className="grid h-8 w-8 place-items-center rounded-full bg-[#18476A] text-xs font-bold text-white overflow-hidden">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={formattedName} className="w-full h-full object-cover" />
+                  ) : (
+                    formattedName.substring(0, 2).toUpperCase()
+                  )}
                 </div>
                 <span className="hidden text-left sm:block">
                   <span className="block text-xs font-bold text-slate-800">{formattedName}</span>
@@ -1324,16 +1357,25 @@ export default function Index() {
                 <ChevronDown size={14} className="hidden text-slate-400 sm:block" />
               </button>
               {profileOpen && (
-                <div className="absolute right-0 top-12 z-50 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+                <div className="absolute right-0 top-12 z-50 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
                   <button
-                    onClick={() => setProfileOpen(false)}
-                    className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
+                    onClick={() => {
+                      setProfileTab("details");
+                      setActiveNav("Profile");
+                      setProfileOpen(false);
+                    }}
+                    className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center justify-between"
                   >
-                    My profile ({userRole})
+                    <span>My profile</span>
+                    <span className="text-[10px] text-slate-400 font-mono">({userRole})</span>
                   </button>
                   <button
-                    onClick={() => setProfileOpen(false)}
-                    className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
+                    onClick={() => {
+                      setProfileTab("security");
+                      setActiveNav("Profile");
+                      setProfileOpen(false);
+                    }}
+                    className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
                   >
                     Change password
                   </button>
@@ -1363,7 +1405,10 @@ export default function Index() {
         )}
         {activeNav === "Permissions" && <PermissionsView />}
         {activeNav === "Activity Log" && <AuditLogView />}
-        {activeNav !== "Dashboard" && activeNav !== "Reports" && activeNav !== "Permissions" && activeNav !== "Activity Log" && (
+        {activeNav === "Profile" && (
+          <ProfileView initialTab={profileTab} />
+        )}
+        {activeNav !== "Dashboard" && activeNav !== "Reports" && activeNav !== "Permissions" && activeNav !== "Activity Log" && activeNav !== "Profile" && (
           <ModulePage
             module={activeNav}
             query={query}

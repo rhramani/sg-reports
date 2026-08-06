@@ -11,10 +11,6 @@ export interface ApiResponse<T = unknown> {
   error?: string;
 }
 
-export interface PingResponse {
-  message: string;
-}
-
 export interface PermissionActions {
   view: boolean;
   add: boolean;
@@ -28,13 +24,48 @@ export interface ModulePermission {
   actions: PermissionActions;
 }
 
+export interface UserNotificationPreferences {
+  emailAlerts: boolean;
+  approvalReminders: boolean;
+  weeklyDigest: boolean;
+}
+
 export interface UserSession {
   email: string;
   name: string;
   role: string;
   authenticatedAt: string;
   expiresAt?: number;
+  mobileNumber?: string;
+  department?: string;
+  avatar?: string;
+  bio?: string;
+  notifications?: UserNotificationPreferences;
   modulePermissions?: ModulePermission[];
+}
+
+export interface UpdateProfileRequest {
+  name?: string;
+  mobileNumber?: string;
+  department?: string;
+  avatar?: string;
+  bio?: string;
+  notifications?: Partial<UserNotificationPreferences>;
+  role?: string;
+}
+
+export interface UpdatePasswordRequest {
+  currentPassword?: string;
+  newPassword?: string;
+  confirmPassword?: string;
+}
+
+export interface ProfileResponse {
+  success: boolean;
+  data?: UserSession & { id?: string; _id?: string; createdAt?: string; updatedAt?: string };
+  message?: string;
+  error?: string;
+  field?: string;
 }
 
 export interface LoginRequest {
@@ -73,6 +104,11 @@ export interface UserItem {
   name: string;
   email: string;
   role: string;
+  mobileNumber?: string;
+  department?: string;
+  avatar?: string;
+  bio?: string;
+  notifications?: UserNotificationPreferences;
   lastActive: string;
   status: "Active" | "Pending" | "Inactive";
 }
@@ -128,19 +164,33 @@ export type AuditActionType =
   | "Logout"
   | string;
 
-export interface AuditLogItem {
+export interface AuditTimelineAction {
   id?: string;
-  _id?: string;
-  userName: string;
-  userEmail: string;
-  userRole: string;
+  timestamp: string;
   module: string;
   section: string;
   action: AuditActionType;
-  timestamp: string;
-  ipAddress?: string;
   details?: string;
 }
+
+export interface AuditSessionLog {
+  id?: string;
+  _id?: string;
+  sessionId: string;
+  userName: string;
+  userEmail: string;
+  userRole: string;
+  loginTime: string;
+  logoutTime?: string | null;
+  status: "Active" | "Completed";
+  duration?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  totalActions: number;
+  timeline: AuditTimelineAction[];
+}
+
+export type AuditLogItem = AuditSessionLog;
 
 export interface AuditLogMetrics {
   totalLogs: number;
@@ -151,7 +201,7 @@ export interface AuditLogMetrics {
 
 export interface AuditLogResponse {
   success: boolean;
-  data: AuditLogItem[];
+  data: AuditSessionLog[];
   total: number;
   page: number;
   pages: number;

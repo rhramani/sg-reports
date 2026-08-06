@@ -34,7 +34,7 @@ function PageLoader() {
     <div className="flex min-h-screen items-center justify-center bg-[#f4f7fa]">
       <div className="flex items-center gap-3">
         <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#18476A] border-t-transparent" />
-        <span className="text-xs font-semibold text-slate-500">Loading Nexora...</span>
+        <span className="text-xs font-semibold text-slate-500">Loading SG Report...</span>
       </div>
     </div>
   );

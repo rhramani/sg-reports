@@ -4,6 +4,7 @@ import { ReportModel } from "../models/Report";
 import { ReportItem } from "@shared/api";
 import { AuthRequest } from "../middleware/auth";
 import { logActivity } from "../utils/auditLogger";
+import { syncReportTypes } from "../utils/reportTypeSyncer";
 
 export const reportsRouter = Router();
 
@@ -70,11 +71,12 @@ reportsRouter.post("/", async (req: AuthRequest, res) => {
       });
     }
 
+    const cleanName = name.trim();
     const reportId = `REP-${Date.now().toString(36).toUpperCase()}`;
     const reportObj: ReportItem = {
       reportId,
-      name: name.trim(),
-      type: type || "Dynamic Report",
+      name: cleanName,
+      type: cleanName,
       source: source || "Spreadsheet Upload",
       owner: owner?.trim() || "Unknown",
       status: "Pending",
@@ -101,6 +103,8 @@ reportsRouter.post("/", async (req: AuthRequest, res) => {
       rowsCount: reportObj.rowsCount,
       data: reportObj.data,
     });
+
+    await syncReportTypes();
 
     await logActivity(req, {
       module: "Reports",
@@ -134,15 +138,18 @@ reportsRouter.put("/:id", async (req: AuthRequest, res) => {
       return res.status(503).json({ success: false, error: "Database unavailable." });
     }
 
+    const cleanName = name.trim();
     const updated = await ReportModel.findOneAndUpdate(
       { $or: [{ _id: id }, { reportId: id }] },
-      { name: name.trim(), type: type?.trim() || "Dynamic Report", owner: owner?.trim() || "Unknown" },
+      { name: cleanName, type: cleanName, owner: owner?.trim() || "Unknown" },
       { new: true }
     );
 
     if (!updated) {
       return res.status(404).json({ success: false, error: "Report not found." });
     }
+
+    await syncReportTypes();
 
     await logActivity(req, {
       module: "Reports",
@@ -221,6 +228,8 @@ reportsRouter.delete("/:id", async (req: AuthRequest, res) => {
     if (!deleted) {
       return res.status(404).json({ success: false, error: "Report not found." });
     }
+
+    await syncReportTypes();
 
     await logActivity(req, {
       module: "Reports",

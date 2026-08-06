@@ -1,6 +1,6 @@
 import mongoose, { Schema, model, Document, Model } from "mongoose";
 
-export interface ModulePermissionActions {
+interface ModulePermissionActions {
   view: boolean;
   add: boolean;
   update: boolean;

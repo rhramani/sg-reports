@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDBStatus } from "../db";
 import { ReportTypeModel } from "../models/ReportType";
+import { syncReportTypes } from "../utils/reportTypeSyncer";
 
 export const reportTypesRouter = Router();
 
@@ -14,6 +15,7 @@ reportTypesRouter.get("/", async (_req, res) => {
         error: "Database is currently unavailable. Please try again shortly.",
       });
     }
+    await syncReportTypes();
     const items = await ReportTypeModel.find().sort({ createdAt: -1 });
     res.json({
       success: true,

@@ -18,6 +18,7 @@ import {
   Edit3,
   Trash2,
   Download,
+  ChevronRight,
 } from "lucide-react";
 import { authFetch } from "@/lib/apiClient";
 
@@ -29,7 +30,7 @@ export interface PermissionActions {
   export: boolean;
 }
 
-export interface ModulePermission {
+interface ModulePermission {
   module: string;
   actions: PermissionActions;
 }
@@ -264,12 +265,14 @@ export function PermissionsView() {
       {/* Clean Page Control Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">
-            {currentRole ? `Permissions Matrix (${currentRole.role})` : "Module Permissions"}
-          </h2>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Configure action privileges for workspace roles across all modules.
-          </p>
+          <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+            <span>Administration</span>
+            <ChevronRight size={12} />
+            <span className="text-slate-600">Permissions</span>
+          </div>
+          <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-slate-900">
+            Permissions
+          </h1>
         </div>
 
         <div className="flex items-center gap-2">

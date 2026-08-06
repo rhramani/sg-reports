@@ -1,6 +1,6 @@
 import mongoose, { Schema, model, Document, Model } from "mongoose";
 
-export interface IApprovalHistory {
+interface IApprovalHistory {
   rowId?: string;
   rowIndex?: number;
   approvedBy: string;
