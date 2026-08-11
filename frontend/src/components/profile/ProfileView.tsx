@@ -246,7 +246,7 @@ export function ProfileView({
   const pwStrength = getPasswordStrength(newPassword);
 
   return (
-    <div className="mx-auto max-w-[1500px] px-5 py-7 sm:px-8 lg:px-10 space-y-6">
+    <div className="w-full max-w-none px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* ── BREADCRUMB ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
         <span>Main menu</span>

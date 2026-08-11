@@ -1,15 +1,15 @@
 import { Router } from "express";
 import { getDBStatus } from "../db";
 import { ReportModel } from "../models/Report";
-import { ReportItem } from "@shared/api";
+import { ReportItem, HeaderStructure } from "@shared/api";
 import { AuthRequest } from "../middleware/auth";
 import { logActivity } from "../utils/auditLogger";
 import { syncReportTypes } from "../utils/reportTypeSyncer";
 
 export const reportsRouter = Router();
 
-// GET /api/reports — List all reports
-reportsRouter.get("/", async (_req, res) => {
+// GET /api/reports — List all reports with dynamic database filtering
+reportsRouter.get("/", async (req, res) => {
   try {
     const dbStatus = getDBStatus();
     if (dbStatus.stateCode !== 1) {
@@ -18,11 +18,117 @@ reportsRouter.get("/", async (_req, res) => {
         error: "Database is currently unavailable. Please try again shortly.",
       });
     }
-    const reports = await ReportModel.find().sort({ createdAt: -1 });
+
+    const { startDate, endDate, type, owner, status, search } = req.query;
+    const queryFilter: Record<string, unknown> = {};
+
+    if (type && typeof type === "string" && type.trim() && type !== "All") {
+      const cleanType = type.trim();
+      queryFilter.$or = [
+        { type: { $regex: cleanType, $options: "i" } },
+        { name: { $regex: cleanType, $options: "i" } },
+      ];
+    }
+
+    if (owner && typeof owner === "string" && owner.trim() && owner !== "All") {
+      queryFilter.owner = { $regex: owner.trim(), $options: "i" };
+    }
+
+    if (status && typeof status === "string" && status.trim() && status !== "All") {
+      queryFilter.status = status.trim();
+    }
+
+    if (search && typeof search === "string" && search.trim()) {
+      const q = search.trim();
+      const searchOr = [
+        { name: { $regex: q, $options: "i" } },
+        { type: { $regex: q, $options: "i" } },
+        { owner: { $regex: q, $options: "i" } },
+      ];
+      if (queryFilter.$or) {
+        queryFilter.$and = [{ $or: queryFilter.$or as unknown[] }, { $or: searchOr }];
+        delete queryFilter.$or;
+      } else {
+        queryFilter.$or = searchOr;
+      }
+    }
+
+    if (startDate || endDate) {
+      const createdAtFilter: Record<string, Date> = {};
+      if (startDate && typeof startDate === "string" && startDate.trim()) {
+        createdAtFilter.$gte = new Date(`${startDate.trim()}T00:00:00.000Z`);
+      }
+      if (endDate && typeof endDate === "string" && endDate.trim()) {
+        createdAtFilter.$lte = new Date(`${endDate.trim()}T23:59:59.999Z`);
+      }
+      queryFilter.createdAt = createdAtFilter;
+    }
+
+    const reports = await ReportModel.find(queryFilter).sort({ createdAt: -1 });
     res.json({
       success: true,
       data: reports,
       message: "Reports retrieved successfully.",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// GET /api/reports/filters/options — Dynamic filter choices from DB (supports date range)
+reportsRouter.get("/filters/options", async (req, res) => {
+  try {
+    const dbStatus = getDBStatus();
+    if (dbStatus.stateCode !== 1) {
+      return res.status(503).json({
+        success: false,
+        error: "Database is currently unavailable. Please try again shortly.",
+      });
+    }
+
+    const { startDate, endDate } = req.query;
+    const queryFilter: Record<string, unknown> = {};
+
+    if (startDate || endDate) {
+      const createdAtFilter: Record<string, Date> = {};
+      if (startDate && typeof startDate === "string" && startDate.trim()) {
+        createdAtFilter.$gte = new Date(`${startDate.trim()}T00:00:00.000Z`);
+      }
+      if (endDate && typeof endDate === "string" && endDate.trim()) {
+        createdAtFilter.$lte = new Date(`${endDate.trim()}T23:59:59.999Z`);
+      }
+      queryFilter.createdAt = createdAtFilter;
+    }
+
+    const types = await ReportModel.distinct("type", queryFilter);
+    const names = await ReportModel.distinct("name", queryFilter);
+    const owners = await ReportModel.distinct("owner", queryFilter);
+    const statuses = ["Pending", "Approved", "Review", "Inactive"];
+
+    const combinedTypes = Array.from(
+      new Set(
+        [...types, ...names]
+          .filter((t): t is string => typeof t === "string" && Boolean(t.trim()))
+          .map((t) => t.trim())
+      )
+    ).sort();
+
+    const cleanOwners = Array.from(
+      new Set(
+        owners
+          .filter((o): o is string => typeof o === "string" && Boolean(o.trim()))
+          .map((o) => o.trim())
+      )
+    ).sort();
+
+    res.json({
+      success: true,
+      data: {
+        types: combinedTypes,
+        owners: cleanOwners,
+        statuses,
+      },
+      message: "Report filter options retrieved successfully.",
     });
   } catch (error) {
     res.status(500).json({ success: false, error: (error as Error).message });
@@ -63,7 +169,7 @@ reportsRouter.get("/:id", async (req, res) => {
 // POST /api/reports — Create report
 reportsRouter.post("/", async (req: AuthRequest, res) => {
   try {
-    const { name, type, source, owner, data } = req.body;
+    const { name, type, source, owner, data, headers, headerStructure } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({
         success: false,
@@ -73,6 +179,15 @@ reportsRouter.post("/", async (req: AuthRequest, res) => {
 
     const cleanName = name.trim();
     const reportId = `REP-${Date.now().toString(36).toUpperCase()}`;
+
+    // Enrich melting report data with Purity field structure before saving to DB
+    const enriched = enrichMeltingReportPurity(
+      cleanName,
+      headers || [],
+      data || [],
+      headerStructure
+    );
+
     const reportObj: ReportItem = {
       reportId,
       name: cleanName,
@@ -80,8 +195,10 @@ reportsRouter.post("/", async (req: AuthRequest, res) => {
       source: source || "Spreadsheet Upload",
       owner: owner?.trim() || "Unknown",
       status: "Pending",
-      rowsCount: Array.isArray(data) ? data.length : 0,
-      data: data || [],
+      rowsCount: Array.isArray(enriched.data) ? enriched.data.length : 0,
+      data: enriched.data || [],
+      headers: enriched.headers || [],
+      headerStructure: enriched.headerStructure as unknown as HeaderStructure | undefined,
       createdAt: new Date().toISOString(),
     };
 
@@ -102,15 +219,20 @@ reportsRouter.post("/", async (req: AuthRequest, res) => {
       status: "Pending",
       rowsCount: reportObj.rowsCount,
       data: reportObj.data,
+      headers: reportObj.headers,
+      headerStructure: reportObj.headerStructure as unknown as Record<string, unknown>,
     });
 
     await syncReportTypes();
 
+    const createdName = newReport?.name || cleanName;
+    const createdRowsCount = newReport?.rowsCount || reportObj.rowsCount;
+
     await logActivity(req, {
       module: "Reports",
-      section: `Report ${newReport.name}`,
+      section: `Report ${createdName}`,
       action: "Add",
-      details: `Uploaded new report "${newReport.name}" with ${newReport.rowsCount} records.`,
+      details: `Uploaded new report "${createdName}" with ${createdRowsCount} records.`,
     });
 
     res.status(201).json({
@@ -296,4 +418,116 @@ reportsRouter.post("/:id/approvals", async (req: AuthRequest, res) => {
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
+
+function enrichMeltingReportPurity(
+  name: string,
+  rawHeaders: string[] = [],
+  rawData: Record<string, unknown>[] = [],
+  headerStructure?: Record<string, unknown>
+): { data: Record<string, unknown>[]; headers: string[]; headerStructure?: Record<string, unknown> } {
+  if (!Array.isArray(rawData) || rawData.length === 0) {
+    return { data: rawData, headers: rawHeaders, headerStructure };
+  }
+
+  const sampleRow = rawData[0] || {};
+  const allKeys = Array.from(new Set([...rawHeaders, ...Object.keys(sampleRow)]));
+
+  const isMelting = name.toLowerCase().includes("melting");
+
+  if (!isMelting) {
+    return { data: rawData, headers: rawHeaders, headerStructure };
+  }
+
+  const parseNum = (value: unknown): number => {
+    if (value === null || value === undefined) return 0;
+    const str = String(value).trim();
+    if (str === "" || str === "—" || str === "-" || str.toLowerCase() === "null" || str.toLowerCase() === "undefined") {
+      return 0;
+    }
+    const cleaned = str.replace(/,/g, "").replace(/[^0-9.-]/g, "");
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : 0;
+  };
+
+  const findColumn = (exactNames: string[], fallbackRegex: RegExp): string | undefined => {
+    for (const n of exactNames) {
+      const found = allKeys.find((c) => c.trim().toLowerCase() === n.toLowerCase());
+      if (found) return found;
+    }
+    return allKeys.find((c) => fallbackRegex.test(c.trim()));
+  };
+
+  const inWeightCol = findColumn(["Weight"], /^weight$/i);
+  const outPureWeightCol = findColumn(["Pure Wt (2)", "Pure Weight (2)"], /^pure\s*(wt|weight)\s*\(2\)$/i);
+  const transNoCol = allKeys.find((c) => /^transno$/i.test(c.trim()));
+  const itemCol = allKeys.find((c) => /^(item|description|product|particular)$/i.test(c.trim()));
+
+  // TransNo grouping totals calculation
+  const transNoTotals = new Map<string, { totalIn: number; totalOutPure: number }>();
+  if (transNoCol && inWeightCol && outPureWeightCol) {
+    rawData.forEach((row) => {
+      const transNo = String(row[transNoCol] ?? "").trim();
+      if (!transNo) return;
+
+      if (!transNoTotals.has(transNo)) {
+        transNoTotals.set(transNo, { totalIn: 0, totalOutPure: 0 });
+      }
+      const totals = transNoTotals.get(transNo)!;
+
+      const inW = parseNum(row[inWeightCol]);
+      if (inW > 0) totals.totalIn += inW;
+
+      const itemName = itemCol ? String(row[itemCol] ?? "").trim().toUpperCase() : "";
+      if (!itemName.includes("ALLOY")) {
+        const outP = parseNum(row[outPureWeightCol]);
+        if (outP > 0) totals.totalOutPure += outP;
+      }
+    });
+  }
+
+  const enrichedData = rawData.map((row) => {
+    const copy = { ...row };
+    const transNo = transNoCol ? String(row[transNoCol] ?? "").trim() : "";
+    let purityStr = "—";
+
+    if (transNo && transNoTotals.has(transNo)) {
+      const totals = transNoTotals.get(transNo)!;
+      if (totals.totalIn > 0) {
+        const purity = (totals.totalOutPure / totals.totalIn) * 100;
+        purityStr = `${purity.toFixed(2)}%`;
+      }
+    } else if (inWeightCol && outPureWeightCol) {
+      const inW = parseNum(row[inWeightCol]);
+      const itemName = itemCol ? String(row[itemCol] ?? "").trim().toUpperCase() : "";
+      const outP = itemName.includes("ALLOY") ? 0 : parseNum(row[outPureWeightCol]);
+      if (inW > 0) {
+        const purity = (outP / inW) * 100;
+        purityStr = `${purity.toFixed(2)}%`;
+      }
+    }
+
+    if (!copy["Purity"] && !copy["purity"]) {
+      copy["Purity"] = purityStr;
+    }
+    return copy;
+  });
+
+  const updatedHeaders = rawHeaders.some((h) => /purity/i.test(h))
+    ? rawHeaders
+    : [...rawHeaders.filter((h) => !/purity/i.test(h)), "Purity"];
+
+  let updatedHeaderStructure = headerStructure;
+  if (headerStructure) {
+    const subHeaders = Array.isArray(headerStructure.subHeaders) ? (headerStructure.subHeaders as string[]) : [];
+    const hasPuritySub = subHeaders.some((s) => /purity/i.test(s));
+    const newSub = hasPuritySub ? subHeaders : [...subHeaders.filter((s) => !/purity/i.test(s)), "Purity"];
+
+    updatedHeaderStructure = {
+      ...headerStructure,
+      subHeaders: newSub,
+    };
+  }
+
+  return { data: enrichedData, headers: updatedHeaders, headerStructure: updatedHeaderStructure };
+}
 

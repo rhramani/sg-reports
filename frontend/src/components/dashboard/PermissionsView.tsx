@@ -247,7 +247,7 @@ export function PermissionsView() {
   );
 
   return (
-    <div className="p-5 sm:p-8 lg:p-10 space-y-6">
+    <div className="w-full max-w-none px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* Toast Notice */}
       {notice && (
         <div

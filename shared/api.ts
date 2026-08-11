@@ -4,13 +4,6 @@
  * and/or small pure JS functions that can be used on both client and server
  */
 
-export interface ApiResponse<T = unknown> {
-  success?: boolean;
-  message?: string;
-  data?: T;
-  error?: string;
-}
-
 export interface PermissionActions {
   view: boolean;
   add: boolean;
@@ -44,30 +37,6 @@ export interface UserSession {
   modulePermissions?: ModulePermission[];
 }
 
-export interface UpdateProfileRequest {
-  name?: string;
-  mobileNumber?: string;
-  department?: string;
-  avatar?: string;
-  bio?: string;
-  notifications?: Partial<UserNotificationPreferences>;
-  role?: string;
-}
-
-export interface UpdatePasswordRequest {
-  currentPassword?: string;
-  newPassword?: string;
-  confirmPassword?: string;
-}
-
-export interface ProfileResponse {
-  success: boolean;
-  data?: UserSession & { id?: string; _id?: string; createdAt?: string; updatedAt?: string };
-  message?: string;
-  error?: string;
-  field?: string;
-}
-
 export interface LoginRequest {
   email: string;
   password?: string;
@@ -84,6 +53,58 @@ export interface LoginResponse {
   field?: "email" | "password";
 }
 
+export interface MergedCellSpan {
+  s: { r: number; c: number };
+  e: { r: number; c: number };
+  rowSpan: number;
+  colSpan: number;
+  value?: string;
+}
+
+export interface SubHeaderCol {
+  key: string;
+  label: string;
+}
+
+export interface MainHeaderGroup {
+  title: string;
+  colSpan: number;
+  rowSpan?: number;
+  isMerged?: boolean;
+  startCol?: number;
+  endCol?: number;
+  columns: SubHeaderCol[];
+}
+
+export interface HeaderLevel {
+  levelIndex: number;
+  groups: MainHeaderGroup[];
+}
+
+export interface HeaderStructure {
+  isMultiLevel: boolean;
+  levels?: HeaderLevel[];
+  mainHeaders: MainHeaderGroup[];
+  subHeaders: string[];
+  dimensions?: {
+    rowCount: number;
+    colCount: number;
+    headerRowCount?: number;
+    dataRowCount?: number;
+  };
+  mergesCount?: number;
+  layoutMode?: "ledger" | "melting" | "grid";
+  hasCreditDebit?: boolean;
+  detectedReportType?: string;
+  dataMerges?: Record<string, MergedCellSpan>;
+}
+
+export interface ReportFilterOptions {
+  types: string[];
+  owners: string[];
+  statuses: string[];
+}
+
 export interface ReportItem {
   id?: string;
   _id?: string;
@@ -95,6 +116,8 @@ export interface ReportItem {
   status: "Pending" | "Approved" | "Review" | "Inactive";
   rowsCount: number;
   data?: Record<string, unknown>[];
+  headers?: string[];
+  headerStructure?: HeaderStructure;
   createdAt?: string | Date;
 }
 
@@ -190,8 +213,6 @@ export interface AuditSessionLog {
   timeline: AuditTimelineAction[];
 }
 
-export type AuditLogItem = AuditSessionLog;
-
 export interface AuditLogMetrics {
   totalLogs: number;
   activeUsersToday: number;
@@ -208,4 +229,3 @@ export interface AuditLogResponse {
   metrics: AuditLogMetrics;
   error?: string;
 }
-

@@ -80,7 +80,7 @@ export function DashboardView() {
   };
 
   return (
-    <div className="mx-auto max-w-[1500px] px-5 py-7 sm:px-8 lg:px-10">
+    <div className="w-full max-w-none px-4 sm:px-6 lg:px-8 py-6">
       <div className="mb-7 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
         <div>
           <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
@@ -166,7 +166,7 @@ export function DashboardView() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
           <table className="w-full min-w-[760px] text-left">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/70 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">

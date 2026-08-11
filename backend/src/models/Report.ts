@@ -16,6 +16,8 @@ export interface IReport extends Document {
   status: "Pending" | "Approved" | "Review" | "Inactive";
   rowsCount: number;
   data?: Record<string, unknown>[];
+  headers?: string[];
+  headerStructure?: Record<string, unknown>;
   approvals?: IApprovalHistory[];
   createdAt: Date;
   updatedAt: Date;
@@ -45,6 +47,8 @@ const ReportSchema = new Schema<IReport>(
     },
     rowsCount: { type: Number, default: 0 },
     data: [Schema.Types.Mixed],
+    headers: [String],
+    headerStructure: { type: Schema.Types.Mixed },
     approvals: [ApprovalSchema],
   },
   { timestamps: true }
