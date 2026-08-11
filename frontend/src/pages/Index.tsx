@@ -1235,12 +1235,12 @@ export default function Index() {
       {sidebarOpen && (
         <button
           aria-label="Close navigation"
-          className="fixed inset-0 z-30 bg-slate-950/30 lg:hidden"
+          className="fixed inset-0 z-45 bg-slate-950/30 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[248px] flex-col bg-[#123955] text-white transition-transform duration-200 lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col bg-[#123955] text-white transition-transform duration-200 lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -1318,7 +1318,7 @@ export default function Index() {
       </aside>
 
       <main className="min-h-screen lg:pl-[248px]">
-        <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-slate-200/80 bg-white/85 px-5 backdrop-blur-xl sm:px-8 lg:px-10">
+        <header className="sticky top-0 z-40 flex h-[76px] items-center justify-between border-b border-slate-200/80 bg-white/85 px-5 backdrop-blur-xl sm:px-8 lg:px-10">
           <div className="flex items-center gap-4">
             <button
               className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
@@ -1357,39 +1357,42 @@ export default function Index() {
                 <ChevronDown size={14} className="hidden text-slate-400 sm:block" />
               </button>
               {profileOpen && (
-                <div className="absolute right-0 top-12 z-50 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
-                  <button
-                    onClick={() => {
-                      setProfileTab("details");
-                      setActiveNav("Profile");
-                      setProfileOpen(false);
-                    }}
-                    className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center justify-between"
-                  >
-                    <span>My profile</span>
-                    <span className="text-[10px] text-slate-400 font-mono">({userRole})</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setProfileTab("security");
-                      setActiveNav("Profile");
-                      setProfileOpen(false);
-                    }}
-                    className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    Change password
-                  </button>
-                  <button
-                    onClick={() => {
-                      authFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
-                      clearAuthSession();
-                      navigate("/login", { replace: true });
-                    }}
-                    className="mt-1 w-full rounded-lg border-t border-slate-100 px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                  >
-                    Log out
-                  </button>
-                </div>
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
+                  <div className="absolute right-0 top-12 z-50 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+                    <button
+                      onClick={() => {
+                        setProfileTab("details");
+                        setActiveNav("Profile");
+                        setProfileOpen(false);
+                      }}
+                      className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center justify-between"
+                    >
+                      <span>My profile</span>
+                      <span className="text-[10px] text-slate-400 font-mono">({userRole})</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setProfileTab("security");
+                        setActiveNav("Profile");
+                        setProfileOpen(false);
+                      }}
+                      className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Change password
+                    </button>
+                    <button
+                      onClick={() => {
+                        authFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+                        clearAuthSession();
+                        navigate("/login", { replace: true });
+                      }}
+                      className="mt-1 w-full rounded-lg border-t border-slate-100 px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                    >
+                      Log out
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>

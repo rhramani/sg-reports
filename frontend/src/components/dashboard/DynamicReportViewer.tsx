@@ -216,12 +216,18 @@ function detectGroupKeyColumn(
     return true;
   };
 
-  // When the first column is a "Book" column, the user explicitly wants
-  // background color to be driven by the SECOND column (the one immediately
-  // after Book), NOT by a heuristically detected voucher/transaction column.
-  // Walk through columns in order (skipping all Book-named columns and
-  // numeric/amount columns) and use the first one that has multiple distinct
-  // values — i.e. literally the next meaningful text column after Book.
+  // Standard heuristic detection
+  // 1. Highest priority: Party / Account / Customer / Name columns (primary grouping entity)
+  const partyCol = columns.find(
+    (c) =>
+      /party|account|customer|vendor|client|name/i.test(c.trim()) &&
+      !/wt|weight|fine|amt|amount|price|cost|balance|piece|pcs|qty|type|book/i.test(
+        c.trim(),
+      ),
+  );
+  if (partyCol && isUsableKey(partyCol)) return partyCol;
+
+  // 2. When the first column is a "Book" column, drive grouping by the next text column after Book
   const firstColIsBook = /^book/i.test(columns[0]?.trim() ?? "");
   if (firstColIsBook) {
     const nonBookCols = columns.filter((c) => !/^book/i.test(c.trim()));
@@ -239,8 +245,7 @@ function detectGroupKeyColumn(
     // If every non-Book text column is constant, fall through to normal detection
   }
 
-  // Standard heuristic detection for reports whose first column is NOT Book
-  // 1. Highest-priority: explicit transaction/voucher identifier columns
+  // 3. Explicit transaction/voucher identifier columns
   const txnCol = columns.find((c) =>
     /voucher|transaction\s*no|trans\s*no|vou\.?\s*no|entry\s*no|ref\s*no|doc\s*no|journal\s*no|bill\s*no|inv\s*no|sr\.?\s*no|sl\.?\s*no/i.test(
       c.trim(),
@@ -248,23 +253,13 @@ function detectGroupKeyColumn(
   );
   if (txnCol && isUsableKey(txnCol)) return txnCol;
 
-  // 2. Broader transaction/voucher keyword match
+  // 4. Broader transaction/voucher keyword match
   const broadTxnCol = columns.find((c) =>
     /voucher|transaction|trans/i.test(c.trim()),
   );
   if (broadTxnCol && isUsableKey(broadTxnCol)) return broadTxnCol;
 
-  // 3. Party / account / name columns (lower priority)
-  const partyCol = columns.find(
-    (c) =>
-      /party|account|name/i.test(c.trim()) &&
-      !/wt|weight|fine|amt|amount|price|cost|balance|piece|pcs|qty/i.test(
-        c.trim(),
-      ),
-  );
-  if (partyCol && isUsableKey(partyCol)) return partyCol;
-
-  // 4. Entry/ref/doc/journal columns
+  // 5. Entry/ref/doc/journal columns
   const entryCol = columns.find((c) =>
     /entry\b|ref\b|doc\b|journal\b|bill\b|inv\b/i.test(c.trim()),
   );
@@ -835,8 +830,6 @@ export function calculateOverallPurity(
 ): string {
   if (!targetRows || targetRows.length === 0) return "—";
 
-  const purityKey = columns.find((c) => /purity/i.test(c.trim()));
-
   const parseNum = (value: any): number => {
     if (value === null || value === undefined) return 0;
     const str = String(value).trim();
@@ -854,22 +847,6 @@ export function calculateOverallPurity(
     return Number.isFinite(num) ? num : 0;
   };
 
-  // If target rows have manually entered Purity values, average them
-  if (purityKey) {
-    let sum = 0;
-    let count = 0;
-    targetRows.forEach((r) => {
-      const val = parseNum(r[purityKey]);
-      if (val > 0) {
-        sum += val;
-        count++;
-      }
-    });
-    if (count > 0) {
-      return `${(sum / count).toFixed(2)}%`;
-    }
-  }
-
   const findColumn = (
     exactNames: string[],
     fallbackRegex: RegExp,
@@ -883,11 +860,18 @@ export function calculateOverallPurity(
     return columns.find((column) => fallbackRegex.test(column.trim()));
   };
 
-  const inWeightColumn = findColumn(["Weight"], /^weight$/i);
-  const outPureWeightColumn = findColumn(
-    ["Pure Wt (2)", "Pure Weight (2)"],
-    /^pure\s*(wt|weight)\s*\(2\)$/i,
-  );
+  const inWeightColumn =
+    findColumn(["Weight"], /^weight$/i) ||
+    columns.find((c) => /in.*wt|weight/i.test(c));
+
+  const outPureWeightColumn =
+    findColumn(
+      ["Pure Wt (2)", "Pure Weight (2)"],
+      /^pure\s*(wt|weight)\s*\(2\)$/i,
+    ) ||
+    columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c)) ||
+    columns.find((c) => /pure\s*(wt|weight)/i.test(c));
+
   const itemColumn = columns.find((column) =>
     /^(item|description|product|particular)$/i.test(column.trim()),
   );
@@ -895,38 +879,69 @@ export function calculateOverallPurity(
   let totalInWeight = 0;
   let totalOutPureWeight = 0;
 
-  targetRows.forEach((currentRow) => {
-    const itemName = itemColumn
-      ? String(currentRow[itemColumn] ?? "")
-          .trim()
-          .toUpperCase()
-      : "";
+  if (inWeightColumn && outPureWeightColumn) {
+    targetRows.forEach((currentRow) => {
+      const itemName = itemColumn
+        ? String(currentRow[itemColumn] ?? "")
+            .trim()
+            .toUpperCase()
+        : "";
 
-    if (inWeightColumn) {
-      const weight = parseNum(currentRow[inWeightColumn]);
-      if (weight > 0) {
-        totalInWeight += weight;
+      if (inWeightColumn) {
+        const weight = parseNum(currentRow[inWeightColumn]);
+        if (weight > 0) {
+          totalInWeight += weight;
+        }
       }
-    }
 
-    if (itemName.includes("ALLOY")) {
-      return;
-    }
-
-    if (outPureWeightColumn) {
-      const outPureWeight = parseNum(currentRow[outPureWeightColumn]);
-      if (outPureWeight > 0) {
-        totalOutPureWeight += outPureWeight;
+      if (itemName.includes("ALLOY")) {
+        return;
       }
-    }
-  });
 
-  if (totalInWeight <= 0) {
-    return "—";
+      if (outPureWeightColumn) {
+        const outPureWeight = parseNum(currentRow[outPureWeightColumn]);
+        if (outPureWeight > 0) {
+          totalOutPureWeight += outPureWeight;
+        }
+      }
+    });
+
+    if (totalInWeight > 0) {
+      const purity = (totalOutPureWeight / totalInWeight) * 100;
+      return `${purity.toFixed(2)}%`;
+    }
   }
 
-  const purity = (totalOutPureWeight / totalInWeight) * 100;
-  return `${purity.toFixed(2)}%`;
+  // Fallback if weight columns are not directly found: weighted average by weight or simple average
+  const purityKey = columns.find((c) => /purity/i.test(c.trim()));
+  if (purityKey) {
+    let weightedSum = 0;
+    let totalWt = 0;
+    let simpleSum = 0;
+    let count = 0;
+
+    targetRows.forEach((r) => {
+      const pVal = parseNum(r[purityKey]);
+      const wtVal = inWeightColumn ? parseNum(r[inWeightColumn]) : 0;
+      if (pVal > 0) {
+        if (wtVal > 0) {
+          weightedSum += pVal * wtVal;
+          totalWt += wtVal;
+        }
+        simpleSum += pVal;
+        count++;
+      }
+    });
+
+    if (totalWt > 0) {
+      return `${(weightedSum / totalWt).toFixed(2)}%`;
+    }
+    if (count > 0) {
+      return `${(simpleSum / count).toFixed(2)}%`;
+    }
+  }
+
+  return "—";
 }
 
 /**
@@ -2192,6 +2207,7 @@ export function DynamicReportViewer({
     }));
     const filled = fillSubEntriesFromMain(sanitized, headers);
     const processedRows = splitMergedEntries(filled, headers);
+    
     const isMelting = cleanName.toLowerCase().includes("melting");
 
     if (isMelting) {
@@ -2629,8 +2645,8 @@ export function DynamicReportViewer({
   }, [visibleGridRows, numericColumnsForTotals]);
 
   const grandTotalPurity = useMemo(() => {
-    return calculateOverallPurity(visibleGridRows, columns);
-  }, [visibleGridRows, columns]);
+    return "0";
+  }, []);
 
   // ── Handlers & Actions ─────────────────────────────────────────────────────
   const getRelatedGroupIndices = (targetIndex: number): number[] => {
@@ -3395,11 +3411,7 @@ export function DynamicReportViewer({
                                 }`}
                               >
                                 {isPurityCol ? (
-                                  purityValue !== "—" && purityValue !== "" ? (
-                                    <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200 shadow-xs whitespace-nowrap">
-                                      {purityValue}
-                                    </span>
-                                  ) : isLastRowOfEntry ? (
+                                  isNewEntryStart && purityValue !== "—" && purityValue !== "" ? (
                                     <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200 shadow-xs whitespace-nowrap">
                                       {purityValue}
                                     </span>
@@ -3443,9 +3455,7 @@ export function DynamicReportViewer({
                               className="border-l border-white/10 px-4 py-3 text-right text-xs font-bold whitespace-nowrap align-middle font-mono"
                             >
                               {isPurityCol ? (
-                                <span className="inline-flex items-center rounded-md bg-emerald-400/20 px-2.5 py-1 text-xs font-bold text-emerald-200 border border-emerald-400/30 whitespace-nowrap">
-                                  {grandTotalPurity}
-                                </span>
+                                grandTotalPurity
                               ) : numericColumnsForTotals.includes(column) ? (
                                 (grandTotals[column] ?? 0).toLocaleString(
                                   "en-IN",

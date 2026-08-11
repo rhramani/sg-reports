@@ -429,14 +429,13 @@ function enrichMeltingReportPurity(
     return { data: rawData, headers: rawHeaders, headerStructure };
   }
 
-  const sampleRow = rawData[0] || {};
-  const allKeys = Array.from(new Set([...rawHeaders, ...Object.keys(sampleRow)]));
-
   const isMelting = name.toLowerCase().includes("melting");
-
   if (!isMelting) {
     return { data: rawData, headers: rawHeaders, headerStructure };
   }
+
+  const sampleRow = rawData[0] || {};
+  const allKeys = Array.from(new Set([...rawHeaders, ...Object.keys(sampleRow)]));
 
   const parseNum = (value: unknown): number => {
     if (value === null || value === undefined) return 0;
@@ -457,8 +456,16 @@ function enrichMeltingReportPurity(
     return allKeys.find((c) => fallbackRegex.test(c.trim()));
   };
 
-  const inWeightCol = findColumn(["Weight"], /^weight$/i);
-  const outPureWeightCol = findColumn(["Pure Wt (2)", "Pure Weight (2)"], /^pure\s*(wt|weight)\s*\(2\)$/i);
+  const inWeightCol = findColumn(["Weight"], /^weight$/i) || allKeys.find((c) => /in.*wt|weight/i.test(c.trim()));
+  const outPureWeightCol = findColumn(["Pure Wt (2)", "Pure Weight (2)"], /^pure\s*(wt|weight)\s*\(2\)$/i) || allKeys.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
+  const hasPurityCol = allKeys.some((c) => /purity/i.test(c.trim()));
+
+  // Dynamically check if the report features weight/purity calculations; otherwise preserve raw data untouched
+  const hasWeightPurityCols = (inWeightCol && outPureWeightCol) || hasPurityCol;
+
+  if (!hasWeightPurityCols) {
+    return { data: rawData, headers: rawHeaders, headerStructure };
+  }
   const transNoCol = allKeys.find((c) => /^transno$/i.test(c.trim()));
   const itemCol = allKeys.find((c) => /^(item|description|product|particular)$/i.test(c.trim()));
 
