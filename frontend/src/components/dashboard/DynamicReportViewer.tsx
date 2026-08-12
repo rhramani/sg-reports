@@ -154,9 +154,6 @@ export function getEntryBandStyle(
   return palette.bands[idx];
 }
 
-const isSubtotalRow = (row: Record<string, any>, columns: string[]) =>
-  columns.some((col) => /total\s*$/i.test(String(row[col] ?? "").trim()));
-
 const parseNumeric = (val: any): number | null => {
   if (val === null || val === undefined) return null;
   const str = String(val).trim();
@@ -181,6 +178,52 @@ const parseNumeric = (val: any): number | null => {
   const num = parseFloat(cleaned);
   return isNaN(num) ? null : num;
 };
+
+const isOpeningBalanceRow = (row: Record<string, any>, columns: string[]) => {
+  if (!row) return false;
+  return columns.some((col) => {
+    const val = String(row[col] ?? "").trim();
+    return /opening\s*bal|op\.?\s*bal/i.test(val);
+  });
+};
+
+const isClosingBalanceRow = (row: Record<string, any>, columns: string[]) => {
+  if (!row) return false;
+  return columns.some((col) => {
+    const val = String(row[col] ?? "").trim();
+    return /closing\s*bal|cl\.?\s*bal/i.test(val);
+  });
+};
+
+const isSubtotalRow = (row: Record<string, any>, columns: string[]) => {
+  if (!row) return false;
+
+  const hasSummaryKeyword = columns.some((col) => {
+    const val = String(row[col] ?? "").trim();
+    if (!val) return false;
+    return (
+      /total\s*$/i.test(val) ||
+      /^total/i.test(val) ||
+      /sub\s*total|subtotal|grand\s*total/i.test(val) ||
+      /closing\s*bal|cl\.?\s*bal/i.test(val)
+    );
+  });
+  if (hasSummaryKeyword) return true;
+
+  const debitCol = columns.find((c) => /^debit$|debit.*amt|dr\.?$/i.test(c.trim()));
+  const creditCol = columns.find((c) => /^credit$|credit.*amt|cr\.?$/i.test(c.trim()));
+
+  if (debitCol && creditCol) {
+    const dAmt = parseNumeric(row[debitCol]) ?? 0;
+    const cAmt = parseNumeric(row[creditCol]) ?? 0;
+    if (dAmt > 0 && cAmt > 0) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 
 function detectGroupKeyColumn(
   rows: Record<string, any>[],
@@ -1582,7 +1625,7 @@ function LedgerTableView({
 
   const formatNum = (num: number, isWeight = false) => {
     return num.toLocaleString("en-IN", {
-      minimumFractionDigits: isWeight ? 3 : 1,
+      minimumFractionDigits: isWeight ? 3 : 2,
       maximumFractionDigits: isWeight ? 3 : 2,
     });
   };
@@ -1642,12 +1685,13 @@ function LedgerTableView({
       "";
     if (value && !/total/i.test(value)) currentGroup = value;
     const meta = rowGroupMeta?.get(origIndex);
+    const isTotal = meta?.isTotalRow ?? isSubtotalRow(row, displayCols);
     return {
       row,
       index: origIndex,
       group: currentGroup,
       groupId: meta?.groupId ?? origIndex,
-      isTotalRow: meta?.isTotalRow ?? false,
+      isTotalRow: isTotal,
     };
   });
 
@@ -1786,6 +1830,37 @@ function LedgerTableView({
     }
   });
   const creditSubTotal = creditVerified + creditUnverified;
+
+  const txnDebitTotal = debit.reduce((sum, { row }) => {
+    if (isOpeningBalanceRow(row, displayCols)) return sum;
+    return (
+      sum +
+      parseAmt(
+        (debitCol && row[debitCol]) ||
+          row["Debit"] ||
+          row["Dr"] ||
+          row[primaryKey] ||
+          row["Amount"],
+      )
+    );
+  }, 0);
+
+  const txnCreditTotal = credit.reduce((sum, { row }) => {
+    if (isOpeningBalanceRow(row, displayCols)) return sum;
+    return (
+      sum +
+      parseAmt(
+        (creditCol && row[creditCol]) ||
+          row["Credit"] ||
+          row["Cr"] ||
+          row[primaryKey] ||
+          row["Amount"],
+      )
+    );
+  }, 0);
+
+  const totalReceipt = txnDebitTotal > 0 ? txnDebitTotal : debitSubTotal;
+  const totalIssue = txnCreditTotal > 0 ? txnCreditTotal : creditSubTotal;
   const closingBalance = debitSubTotal - creditSubTotal;
 
   return (
@@ -1895,7 +1970,7 @@ function LedgerTableView({
                 Total Issue
               </div>
               <div className="text-right font-black text-[#083c38] font-mono text-[13px] pr-2">
-                {formatNum(creditSubTotal, isWeight)}
+                {formatNum(totalIssue, isWeight)}
               </div>
             </div>
             {/* Debit Side Total Receipt (right) */}
@@ -1904,7 +1979,7 @@ function LedgerTableView({
                 Total Receipt
               </div>
               <div className="text-right font-black text-[#522919] font-mono text-[13px] pr-2">
-                {formatNum(debitSubTotal, isWeight)}
+                {formatNum(totalReceipt, isWeight)}
               </div>
             </div>
           </div>
@@ -2067,7 +2142,20 @@ export function DynamicReportViewer({
         if (t && t.trim()) set.add(t.trim());
       });
     }
-    return Array.from(set).sort();
+    const list = Array.from(set);
+    const humanTitles = new Set(list.filter((name) => !name.includes("_")));
+    const filteredList = list.filter((name) => {
+      if (name.includes("_")) {
+        const cleanAlpha = name.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+        const hasHumanMatch = Array.from(humanTitles).some(
+          (h) => h.replace(/[^A-Z0-9]/gi, "").toUpperCase() === cleanAlpha,
+        );
+        if (hasHumanMatch) return false;
+      }
+      return true;
+    });
+
+    return filteredList.sort();
   }, [savedReports, filterOptions.types]);
 
   const loadSavedReports = async (

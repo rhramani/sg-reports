@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDBStatus } from "../db";
 import { ReportModel } from "../models/Report";
+import { ReportTypeModel } from "../models/ReportType";
 import { ReportItem, HeaderStructure } from "@shared/api";
 import { AuthRequest } from "../middleware/auth";
 import { logActivity } from "../utils/auditLogger";
@@ -70,7 +71,18 @@ reportsRouter.get("/", async (req, res) => {
       queryFilter.createdAt = createdAtFilter;
     }
 
-    const reports = await ReportModel.find(queryFilter).sort({ createdAt: -1 });
+    let reports = await ReportModel.find(queryFilter).sort({ createdAt: -1 });
+
+    // Fallback: If strict date range yielded no reports for a specific type or query, retry without date constraint
+    if (reports.length === 0 && (startDate || endDate)) {
+      const fallbackFilter = { ...queryFilter };
+      delete fallbackFilter.createdAt;
+      const fallbackReports = await ReportModel.find(fallbackFilter).sort({ createdAt: -1 });
+      if (fallbackReports.length > 0) {
+        reports = fallbackReports;
+      }
+    }
+
     res.json({
       success: true,
       data: reports,
@@ -92,28 +104,18 @@ reportsRouter.get("/filters/options", async (req, res) => {
       });
     }
 
-    const { startDate, endDate } = req.query;
-    const queryFilter: Record<string, unknown> = {};
+    const [types, names, catalogTypes, owners] = await Promise.all([
+      ReportModel.distinct("type"),
+      ReportModel.distinct("name"),
+      ReportTypeModel.distinct("name"),
+      ReportModel.distinct("owner"),
+    ]);
 
-    if (startDate || endDate) {
-      const createdAtFilter: Record<string, Date> = {};
-      if (startDate && typeof startDate === "string" && startDate.trim()) {
-        createdAtFilter.$gte = new Date(`${startDate.trim()}T00:00:00.000Z`);
-      }
-      if (endDate && typeof endDate === "string" && endDate.trim()) {
-        createdAtFilter.$lte = new Date(`${endDate.trim()}T23:59:59.999Z`);
-      }
-      queryFilter.createdAt = createdAtFilter;
-    }
-
-    const types = await ReportModel.distinct("type", queryFilter);
-    const names = await ReportModel.distinct("name", queryFilter);
-    const owners = await ReportModel.distinct("owner", queryFilter);
     const statuses = ["Pending", "Approved", "Review", "Inactive"];
 
     const combinedTypes = Array.from(
       new Set(
-        [...types, ...names]
+        [...types, ...names, ...catalogTypes]
           .filter((t): t is string => typeof t === "string" && Boolean(t.trim()))
           .map((t) => t.trim())
       )
