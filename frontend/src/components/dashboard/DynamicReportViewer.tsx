@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -153,11 +154,6 @@ export function getEntryBandStyle(
   return palette.bands[idx];
 }
 
-// ── Shared row-grouping helpers ──────────────────────────────────────────────
-// These work generically across every report type (Journal, Bank Book, Metal
-// Issue, Melting, etc.) because in each one, SOME cell in a subtotal row ends
-// with the word "Total" — even though which column carries it differs per file.
-
 const isSubtotalRow = (row: Record<string, any>, columns: string[]) =>
   columns.some((col) => /total\s*$/i.test(String(row[col] ?? "").trim()));
 
@@ -174,37 +170,24 @@ const parseNumeric = (val: any): number | null => {
   ) {
     return null;
   }
-  // If string contains alphabetic characters (e.g. MC/26-27/0096, G22KT, YELLOW ALLOY, JV-001), it is not a numeric measure
   if (/[a-zA-Z]/.test(str)) return null;
 
-  // If string matches date pattern (e.g. 01/08/2026, 2026-08-01, 01-08-2026), it is not a numeric measure
   if (/^\d{1,4}[/-]\d{1,2}[/-]\d{1,4}$/.test(str)) return null;
 
-  // Clean formatting characters like commas or spaces
   const cleaned = str.replace(/[, \s]/g, "");
 
-  // Must be a valid floating point number
   if (!/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
 
   const num = parseFloat(cleaned);
   return isNaN(num) ? null : num;
 };
 
-/**
- * Finds the column that behaves like an "entry label": blank on continuation
- * rows, filled when a new entry starts, and — the key safety check — most of
- * its runs actually end in a subtotal row. That last check is what stops it
- * from mis-firing on a flat file (e.g. a plain cash ledger) where some column
- * happens to be sometimes-blank (like a Remarks field) but isn't a real
- * grouping column.
- */
 function detectGroupKeyColumn(
   rows: Record<string, any>[],
   columns: string[],
 ): string | null {
   if (!rows.length || !columns.length) return null;
 
-  // Helper: check a candidate column has values AND is not constant (all rows same)
   const isUsableKey = (col: string) => {
     const vals = rows
       .filter((r) => !isSubtotalRow(r, columns))
@@ -216,8 +199,6 @@ function detectGroupKeyColumn(
     return true;
   };
 
-  // Standard heuristic detection
-  // 1. Highest priority: Party / Account / Customer / Name columns (primary grouping entity)
   const partyCol = columns.find(
     (c) =>
       /party|account|customer|vendor|client|name/i.test(c.trim()) &&
@@ -227,12 +208,10 @@ function detectGroupKeyColumn(
   );
   if (partyCol && isUsableKey(partyCol)) return partyCol;
 
-  // 2. When the first column is a "Book" column, drive grouping by the next text column after Book
   const firstColIsBook = /^book/i.test(columns[0]?.trim() ?? "");
   if (firstColIsBook) {
     const nonBookCols = columns.filter((c) => !/^book/i.test(c.trim()));
     for (const col of nonBookCols) {
-      // Skip purely numeric / amount / weight columns
       if (
         /wt|weight|fine|amt|amount|price|credit|debit|cost|balance|qty|quantity|piece|pcs/i.test(
           col,
@@ -242,10 +221,8 @@ function detectGroupKeyColumn(
       }
       if (isUsableKey(col)) return col;
     }
-    // If every non-Book text column is constant, fall through to normal detection
   }
 
-  // 3. Explicit transaction/voucher identifier columns
   const txnCol = columns.find((c) =>
     /voucher|transaction\s*no|trans\s*no|vou\.?\s*no|entry\s*no|ref\s*no|doc\s*no|journal\s*no|bill\s*no|inv\s*no|sr\.?\s*no|sl\.?\s*no/i.test(
       c.trim(),
@@ -253,19 +230,16 @@ function detectGroupKeyColumn(
   );
   if (txnCol && isUsableKey(txnCol)) return txnCol;
 
-  // 4. Broader transaction/voucher keyword match
   const broadTxnCol = columns.find((c) =>
     /voucher|transaction|trans/i.test(c.trim()),
   );
   if (broadTxnCol && isUsableKey(broadTxnCol)) return broadTxnCol;
 
-  // 5. Entry/ref/doc/journal columns
   const entryCol = columns.find((c) =>
     /entry\b|ref\b|doc\b|journal\b|bill\b|inv\b/i.test(c.trim()),
   );
   if (entryCol && isUsableKey(entryCol)) return entryCol;
 
-  // 5. Fallback: any non-numeric column with partial (sparse) fill pattern
   for (const col of columns) {
     if (
       /wt|weight|fine|amt|amount|price|credit|debit|cost|balance|qty|quantity|piece|pcs/i.test(
@@ -303,28 +277,40 @@ function computeRowGroups(
   const meta = new Map<number, GroupedRowMeta>();
   if (!rows.length) return meta;
 
-  // 1. Grouping when an explicit key column exists
+  const typeCol = columns.find((c) =>
+    /type|category|nature|dr.?cr|credit.?debit|p\.?type|inout/i.test(c.trim()),
+  );
+
   if (groupKeyColumn) {
     let groupId = -1;
     let lastSeenVal = "";
+    let lastSeenType = "";
 
     rows.forEach((r, i) => {
       const idx = typeof r._originalIndex === "number" ? r._originalIndex : i;
       const isTotal = isSubtotalRow(r, columns);
       const v = String(r[groupKeyColumn] ?? "").trim();
+      const t = typeCol ? String(r[typeCol] ?? "").trim() : "";
 
       if (isTotal) {
         meta.set(idx, { groupId: Math.max(0, groupId), isTotalRow: true });
+        lastSeenVal = "";
+        lastSeenType = "";
         return;
       }
 
       if (v !== "") {
-        if (v !== lastSeenVal || groupId === -1) {
+        if (v !== lastSeenVal || (t !== "" && t !== lastSeenType) || groupId === -1) {
           groupId++;
           lastSeenVal = v;
+          if (t !== "") lastSeenType = t;
         }
       } else {
         if (groupId === -1) groupId = 0;
+        if (t !== "" && t !== lastSeenType) {
+          groupId++;
+          if (t !== "") lastSeenType = t;
+        }
       }
 
       meta.set(idx, { groupId, isTotalRow: false });
@@ -333,7 +319,6 @@ function computeRowGroups(
     return meta;
   }
 
-  // 2. Fallback: Search for any transaction/voucher column
   const fallbackKeyCol = columns.find((c) =>
     /voucher|transaction|trans|vou|entry|ref|doc|journal|bill|inv|sr|sl|date|party/i.test(
       c,
@@ -343,20 +328,25 @@ function computeRowGroups(
   if (fallbackKeyCol) {
     let groupId = -1;
     let lastVal = "";
+    let lastType = "";
 
     rows.forEach((r, i) => {
       const idx = typeof r._originalIndex === "number" ? r._originalIndex : i;
       const isTotal = isSubtotalRow(r, columns);
       const v = String(r[fallbackKeyCol] ?? "").trim();
+      const t = typeCol ? String(r[typeCol] ?? "").trim() : "";
 
       if (isTotal) {
         meta.set(idx, { groupId: Math.max(0, groupId), isTotalRow: true });
+        lastVal = "";
+        lastType = "";
         return;
       }
 
-      if (v !== "" && v !== lastVal) {
+      if ((v !== "" && v !== lastVal) || (t !== "" && t !== lastType)) {
         groupId++;
         lastVal = v;
+        if (t !== "") lastType = t;
       }
       if (groupId === -1) groupId = 0;
 
@@ -366,7 +356,6 @@ function computeRowGroups(
     return meta;
   }
 
-  // 3. Sequential row entry grouping (alternating entry IDs for standalone rows)
   rows.forEach((r, i) => {
     const idx = typeof r._originalIndex === "number" ? r._originalIndex : i;
     meta.set(idx, { groupId: i, isTotalRow: isSubtotalRow(r, columns) });
@@ -377,7 +366,6 @@ function computeRowGroups(
 
 function detectNumericColumns(rows: Record<string, any>[], columns: string[]) {
   return columns.filter((col) => {
-    // Explicitly exclude columns whose names denote text identifiers or non-measure attributes
     if (
       /trans|voucher|vou|doc|ref|no|num|code|id|item|name|book|party|account|date|time|phone|mobile|sr|sl|serial|loss|brk|miss|type|status|narration|remarks/i.test(
         col,
@@ -389,7 +377,6 @@ function detectNumericColumns(rows: Record<string, any>[], columns: string[]) {
       return false;
     }
 
-    // Include columns whose names explicitly denote numeric measure quantities
     if (
       /wt|weight|fine|amt|amount|price|credit|debit|cost|balance|piece|pcs|qty|quantity/i.test(
         col,
@@ -409,10 +396,6 @@ function detectNumericColumns(rows: Record<string, any>[], columns: string[]) {
   });
 }
 
-/**
- * Automatically populates blank non-numeric header/metadata fields in sub-entries
- * using corresponding values from the main entry and running header context.
- */
 export function fillSubEntriesFromMain(
   rows: Record<string, any>[],
   columns: string[],
@@ -427,54 +410,82 @@ export function fillSubEntriesFromMain(
       ),
     ) || columns[0];
 
+  const typeCol = columns.find((c) =>
+    /type|category|nature|dr.?cr|credit.?debit|p\.?type|inout/i.test(c.trim()),
+  );
+
   const isNumericCol = (col: string) =>
     /wt|weight|fine|amt|amount|price|credit|debit|total|cost|balance|qty|quantity|piece|pcs/i.test(
       col,
     );
 
-  // Global running header context across the report (e.g. Book Name, Date, Party)
-  const runningHeaderContext: Record<string, string> = {};
+  const isItemOrDetailCol = (col: string) =>
+    /remark|narra?tion|item|product|description|detail|note|comment|particular/i.test(
+      col.trim(),
+    ) && !/book|head|party|account|customer|vendor|company|owner/i.test(col.trim());
+
+  const isGlobalHeaderCol = (col: string) =>
+    !isItemOrDetailCol(col);
+
+  const isVoucherIdCol = (col: string) =>
+    /voucher|transaction|vou\.?no|transno|ref\.?no|doc\.?no|entry\.?no|sr\.?no|sl\.?no|bill\.?no|inv\.?no/i.test(
+      col.trim(),
+    );
+
+  const globalHeaderContext: Record<string, string> = {};
+  let entryHeaderContext: Record<string, string> = {};
 
   let currentTransKeyVal = "";
+  let currentGroupTypeVal = "";
   let currentMainEntry: Record<string, any> | null = null;
 
   return rows.map((row) => {
-    // Leave subtotal rows untouched
     if (isSubtotalRow(row, columns)) {
+      entryHeaderContext = {};
+      currentMainEntry = null;
       return { ...row };
-    }
-
-    // Update running header context with any non-blank header values found in this row
-    for (const col of columns) {
-      if (isNumericCol(col)) continue;
-      const val = String(row[col] ?? "").trim();
-      if (val !== "" && val !== "—") {
-        if (
-          /book|date|party|account|source|owner|company|branch|loss|brk|miss/i.test(
-            col,
-          )
-        ) {
-          runningHeaderContext[col] = val;
-        }
-      }
     }
 
     const groupVal = groupKeyCol ? String(row[groupKeyCol] ?? "").trim() : "";
     const transVal = transactionKeyCol
       ? String(row[transactionKeyCol] ?? "").trim()
       : "";
+    const rowTypeVal = typeCol ? String(row[typeCol] ?? "").trim() : "";
 
     const activeKeyVal = groupKeyCol ? groupVal : transVal;
 
-    // A new transaction/entry group begins when activeKeyVal is non-empty and DIFFERENT from previous group
-    const isNewGroup =
+    const isNewTypeSection =
+      rowTypeVal !== "" && rowTypeVal !== currentGroupTypeVal;
+    const isNewKeyGroup =
       activeKeyVal !== "" && activeKeyVal !== currentTransKeyVal;
+    const isNewGroup =
+      isNewKeyGroup || isNewTypeSection || currentMainEntry === null;
 
-    if (isNewGroup || currentMainEntry === null) {
-      currentTransKeyVal = activeKeyVal;
-      // Start a new main entry block, merging any available running header context
+    if (isNewKeyGroup) {
+      entryHeaderContext = {};
+    }
+
+    for (const col of columns) {
+      if (isNumericCol(col)) continue;
+      const val = String(row[col] ?? "").trim();
+      if (val !== "" && val !== "—") {
+        if (isGlobalHeaderCol(col)) {
+          globalHeaderContext[col] = val;
+        } else {
+          entryHeaderContext[col] = val;
+        }
+      }
+    }
+
+    if (isNewGroup) {
+      if (activeKeyVal !== "") currentTransKeyVal = activeKeyVal;
+      if (rowTypeVal !== "") currentGroupTypeVal = rowTypeVal;
+
       const newMain = { ...row };
-      for (const [hCol, hVal] of Object.entries(runningHeaderContext)) {
+      for (const [hCol, hVal] of Object.entries({
+        ...globalHeaderContext,
+        ...entryHeaderContext,
+      })) {
         const cVal = String(newMain[hCol] ?? "").trim();
         if (cVal === "" || cVal === "—") {
           newMain[hCol] = hVal;
@@ -484,36 +495,25 @@ export function fillSubEntriesFromMain(
       return newMain;
     }
 
-    // It's a sub-entry within the current transaction/group block:
-    // Fill blank non-numeric fields from currentMainEntry and runningHeaderContext
     const filledRow = { ...row };
 
-    // 1. Fill from currentMainEntry
-    for (const col of Object.keys(currentMainEntry)) {
-      if (col === "_originalIndex") continue;
-      if (isNumericCol(col)) continue;
+    const mergedContext = {
+      ...globalHeaderContext,
+      ...entryHeaderContext,
+      ...(currentMainEntry || {}),
+    };
 
+    for (const [col, val] of Object.entries(mergedContext)) {
+      if (col === "_originalIndex" || isNumericCol(col))
+        continue;
       const currentVal = String(filledRow[col] ?? "").trim();
-      const mainVal = String(currentMainEntry[col] ?? "").trim();
+      const fillVal = String(val ?? "").trim();
       if (
         (currentVal === "" || currentVal === "—") &&
-        mainVal !== "" &&
-        mainVal !== "—"
+        fillVal !== "" &&
+        fillVal !== "—"
       ) {
-        filledRow[col] = mainVal;
-      }
-    }
-
-    // 2. Fill from runningHeaderContext for any remaining blank header fields
-    for (const [hCol, hVal] of Object.entries(runningHeaderContext)) {
-      if (isNumericCol(hCol)) continue;
-      const currentVal = String(filledRow[hCol] ?? "").trim();
-      if (
-        (currentVal === "" || currentVal === "—") &&
-        hVal !== "" &&
-        hVal !== "—"
-      ) {
-        filledRow[hCol] = hVal;
+        filledRow[col] = fillVal;
       }
     }
 
@@ -521,9 +521,6 @@ export function fillSubEntriesFromMain(
   });
 }
 
-/**
- * Helper to check if a row represents an ALLOY item (e.g. "ALLOY", "YELLOW ALLOY", "WHITE ALLOY").
- */
 export function isAlloyItem(row: Record<string, any>): boolean {
   if (!row) return false;
   const keysToCheck = Object.keys(row).filter((k) =>
@@ -539,9 +536,6 @@ export function isAlloyItem(row: Record<string, any>): boolean {
   });
 }
 
-/**
- * Sets OUT side Pure Wt to "0" for ALLOY items in melting reports.
- */
 export function zeroAlloyOutPureWeight(
   rows: Record<string, any>[],
   columns: string[],
@@ -553,7 +547,6 @@ export function zeroAlloyOutPureWeight(
 
     const updated = { ...row };
 
-    // 1. Target any explicit OUT side Pure Wt column (e.g. "Pure Wt (2)", "Out Pure Wt", "Pure Wt_1", etc.)
     const outPureCols = Object.keys(updated).filter((col) =>
       /\b(out|side2|\(2\)|_1|_2)\b.*pure|pure.*(out|side2|\(2\)|_1|_2)|\bpure\s*wt\s*\(2\)|\bout\s*pure\s*wt|\bpure\s*weight\s*\(2\)/i.test(
         col,
@@ -564,7 +557,6 @@ export function zeroAlloyOutPureWeight(
       updated[col] = "0";
     });
 
-    // 2. If this row is a Side 2 (OUT) row, set any standard "Pure Wt" or "Pure Weight" column on this row to "0"
     const hasOutWeight = Object.keys(updated).some(
       (col) =>
         /\(2\)|_2|\s2$|credit|out/i.test(col) &&
@@ -589,10 +581,6 @@ export function zeroAlloyOutPureWeight(
   });
 }
 
-/**
- * Detects rows that contain two merged entries (e.g., both Side 1 measures like WEIGHT/DEBIT
- * and Side 2 measures like WEIGHT (2)/CREDIT populated) and splits them into separate rows.
- */
 export function splitMergedEntries(
   rows: Record<string, any>[],
   columns: string[],
@@ -633,13 +621,11 @@ export function splitMergedEntries(
     });
 
     if (hasSide1Value && hasSide2Value) {
-      // Row A: Side 1 entry (clear Side 2 measure columns)
       const rowA: Record<string, any> = { ...row };
       side2Cols.forEach((col) => {
         rowA[col] = "";
       });
 
-      // Row B: Side 2 entry (clear Side 1 measure columns)
       const rowB: Record<string, any> = { ...row };
       side1Cols.forEach((col) => {
         rowB[col] = "";
@@ -660,9 +646,6 @@ export function splitMergedEntries(
   }));
 }
 
-// Two alternating pastel bands for regular entries, with a slightly deeper
-// shade of the same hue reserved for that entry's own subtotal row so it
-// still reads as "part of the same block" rather than a break in it.
 const GROUP_BANDS = [
   { base: "bg-white", total: "bg-slate-100" },
   { base: "bg-[#eef4fb]", total: "bg-[#d9e8f7]" },
@@ -674,7 +657,6 @@ export function calculateRowPurity(
   groupIndices?: number[],
   allRows?: Record<string, any>[],
 ): string {
-  // 1. Check if row already has a manually entered or uploaded Purity value
   const purityKey = columns.find((c) => /purity/i.test(c.trim()));
   if (purityKey && row[purityKey] !== undefined && row[purityKey] !== null) {
     const rawVal = String(row[purityKey]).trim();
@@ -687,10 +669,9 @@ export function calculateRowPurity(
     ) {
       const cleaned = rawVal.replace(/%/g, "").trim();
       const num = Number(cleaned);
-      if (Number.isFinite(num)) {
+      if (Number.isFinite(num) && num > 0) {
         return rawVal.includes("%") ? rawVal : `${num.toFixed(2)}%`;
       }
-      return rawVal;
     }
   }
 
@@ -728,19 +709,26 @@ export function calculateRowPurity(
     return columns.find((column) => fallbackRegex.test(column.trim()));
   };
 
-  const inWeightColumn =
-    findColumn(["Weight"], /^weight$/i) ||
-    columns.find((c) => /in.*wt|weight/i.test(c));
-
+  const pureWtCols = columns.filter((c) => /pure\s*(wt|weight)/i.test(c.trim()));
   let outPureWeightColumn =
     findColumn(
       ["Pure Wt (2)", "Pure Weight (2)"],
       /^pure\s*(wt|weight)\s*\(2\)$/i,
     ) ||
-    columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c)) ||
-    columns.find((c) => /pure\s*(wt|weight)/i.test(c));
+    columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
 
-  // Check single row first if row has IN weight and OUT pure weight directly
+  if (!outPureWeightColumn && pureWtCols.length > 1) {
+    outPureWeightColumn = pureWtCols[pureWtCols.length - 1];
+  } else if (!outPureWeightColumn && pureWtCols.length === 1) {
+    outPureWeightColumn = pureWtCols[0];
+  }
+
+  const weightCols = columns.filter((c) => /^weight$|in.*wt/i.test(c.trim()) && !/pure/i.test(c));
+  let inWeightColumn =
+    findColumn(["Weight"], /^weight$/i) ||
+    columns.find((c) => /in.*wt/i.test(c.trim())) ||
+    weightCols[0];
+
   if (inWeightColumn && outPureWeightColumn) {
     const inWt = parseNum(row[inWeightColumn]);
     const outPureWt = parseNum(row[outPureWeightColumn]);
@@ -759,7 +747,7 @@ export function calculateRowPurity(
   if (allRows && allRows.length > 0 && transNoColumn) {
     const currentTransNo = String(row[transNoColumn] ?? "").trim();
 
-    if (currentTransNo) {
+    if (currentTransNo && currentTransNo !== "—") {
       targetRows = allRows.filter(
         (item) => String(item[transNoColumn] ?? "").trim() === currentTransNo,
       );
@@ -860,17 +848,25 @@ export function calculateOverallPurity(
     return columns.find((column) => fallbackRegex.test(column.trim()));
   };
 
-  const inWeightColumn =
-    findColumn(["Weight"], /^weight$/i) ||
-    columns.find((c) => /in.*wt|weight/i.test(c));
-
-  const outPureWeightColumn =
+  const pureWtCols = columns.filter((c) => /pure\s*(wt|weight)/i.test(c.trim()));
+  let outPureWeightColumn =
     findColumn(
       ["Pure Wt (2)", "Pure Weight (2)"],
       /^pure\s*(wt|weight)\s*\(2\)$/i,
     ) ||
-    columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c)) ||
-    columns.find((c) => /pure\s*(wt|weight)/i.test(c));
+    columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
+
+  if (!outPureWeightColumn && pureWtCols.length > 1) {
+    outPureWeightColumn = pureWtCols[pureWtCols.length - 1];
+  } else if (!outPureWeightColumn && pureWtCols.length === 1) {
+    outPureWeightColumn = pureWtCols[0];
+  }
+
+  const weightCols = columns.filter((c) => /^weight$|in.*wt/i.test(c.trim()) && !/pure/i.test(c));
+  let inWeightColumn =
+    findColumn(["Weight"], /^weight$/i) ||
+    columns.find((c) => /in.*wt/i.test(c.trim())) ||
+    weightCols[0];
 
   const itemColumn = columns.find((column) =>
     /^(item|description|product|particular)$/i.test(column.trim()),
@@ -912,7 +908,6 @@ export function calculateOverallPurity(
     }
   }
 
-  // Fallback if weight columns are not directly found: weighted average by weight or simple average
   const purityKey = columns.find((c) => /purity/i.test(c.trim()));
   if (purityKey) {
     let weightedSum = 0;
@@ -944,23 +939,6 @@ export function calculateOverallPurity(
   return "—";
 }
 
-/**
- * Re-groups a header level's columns against the column order actually
- * being rendered (`displayColumns`), rather than trusting the level's
- * stored colSpans directly. This lets a column that isn't part of any
- * stored group — e.g. a computed "Purity" column inserted between the IN
- * and OUT groups — take its correct position and colSpan automatically:
- *
- * - If the columns on either side of it belong to the SAME group (e.g. an
- *   outer "On Hand" group that wraps both IN and OUT), it's folded into
- *   that group, extending its colSpan by one.
- * - If the columns on either side belong to DIFFERENT groups (the actual
- *   IN/OUT split), it renders as its own standalone, untitled cell between
- *   them.
- *
- * This keeps every level's colSpans summing exactly to displayColumns.length
- * with no separate "missing span" filler cell required.
- */
 export function buildDisplayHeaderGroups(
   groups: MainHeaderGroup[],
   displayColumns: string[],
@@ -1090,8 +1068,6 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
     for (let r = m.s.r; r <= m.e.r; r++) {
       if (!matrix[r]) matrix[r] = [];
       for (let c = m.s.c; c <= m.e.c; c++) {
-        // For subHeaderIndex and data rows, non-origin cells in horizontal merges (c > m.s.c)
-        // should NOT duplicate the header label text into duplicate columns!
         if (c > m.s.c && r >= subHeaderIndex) {
           matrix[r][c] = "";
         } else {
@@ -1285,14 +1261,17 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
   };
 }
 
+interface LedgerPaneRow {
+  row: Record<string, any>;
+  index: number;
+  group: string;
+  groupId: number;
+}
+
 interface LedgerPaneProps {
   title: string;
   tone: "debit" | "credit";
-  rows: {
-    row: Record<string, string>;
-    index: number;
-    group: string;
-  }[];
+  rows: LedgerPaneRow[];
   columns: string[];
   transactionKey: string;
   typeKey: string;
@@ -1301,8 +1280,19 @@ interface LedgerPaneProps {
   selected: number[];
   toggleApproval: (index: number) => void;
   getRelatedGroupIndices?: (index: number) => number[];
-  rowGroupMeta?: Map<number, GroupedRowMeta>;
   entryColorPalette?: EntryColorPaletteKey;
+  onDeleteRow?: (index: number) => void;
+  canDelete?: boolean;
+}
+
+interface LedgerRenderItem {
+  kind: "row";
+  row: Record<string, any>;
+  index: number;
+  group: string;
+  groupId: number;
+  bandIndex: number;
+  isNewEntryStart: boolean;
 }
 
 function LedgerPane({
@@ -1317,155 +1307,235 @@ function LedgerPane({
   selected,
   toggleApproval,
   getRelatedGroupIndices,
-  rowGroupMeta,
   entryColorPalette = "classic",
+  onDeleteRow,
+  canDelete = false,
 }: LedgerPaneProps) {
   const isDebit = tone === "debit";
 
-  // Filter out internal metadata column _originalIndex
   const displayColumns = columns.filter((col) => col !== "_originalIndex");
 
-  // Non-numeric columns render as normal table columns; numeric/amount
-  // columns get their own right-aligned columns at the end.
   const textColumns = displayColumns.filter(
     (column) => column !== amountKey && !numericKeys.includes(column),
   );
 
+  const parseAmt = (val: any) => {
+    if (!val) return 0;
+    const num = parseFloat(String(val).replace(/[^0-9.-]+/g, ""));
+    return isNaN(num) ? 0 : num;
+  };
+
+  const formatAmt = (num: number, col: string) =>
+    (num || 0).toLocaleString("en-IN", {
+      minimumFractionDigits: /wt|weight|fine/i.test(col) ? 3 : 2,
+      maximumFractionDigits: 3,
+    });
+
+  const toneText = isDebit ? "text-[#8f5039]" : "text-[#126c65]";
+  const toneHeaderBorder = isDebit
+    ? "border-[#d9c2b5] bg-[#ead8ce]"
+    : "border-[#b9d0cc] bg-[#dcece9]";
+
+  const paneGrandTotal: Record<string, number> = {};
+  numericKeys.forEach((nk) => (paneGrandTotal[nk] = 0));
+
+  const renderItems: LedgerRenderItem[] = [];
+  let i = 0;
+  let bandIndex = -1;
+  while (i < rows.length) {
+    const groupId = rows[i].groupId;
+    bandIndex++;
+    const groupRows: LedgerPaneRow[] = [];
+    while (i < rows.length && rows[i].groupId === groupId) {
+      groupRows.push(rows[i]);
+      i++;
+    }
+    groupRows.forEach(({ row, index, group }, gi) => {
+      renderItems.push({
+        kind: "row",
+        row,
+        index,
+        group,
+        groupId,
+        bandIndex,
+        isNewEntryStart: gi === 0,
+      });
+      numericKeys.forEach((nk) => {
+        paneGrandTotal[nk] += parseAmt(row[nk]);
+      });
+    });
+  }
+
+  const activeNumericKeys = useMemo(() => {
+    const active = numericKeys.filter((nk) => {
+      if (rows.length > 0) {
+        const allZero = rows.every((r) => parseAmt(r.row[nk]) === 0);
+        if (allZero) return false;
+      }
+      return true;
+    });
+    return active.length > 0 ? active : numericKeys;
+  }, [numericKeys, rows]);
+
   return (
     <div
-      className={`min-w-[420px] flex-1 overflow-x-auto ${
+      className={`min-w-[420px] flex-1 ${
         isDebit ? "bg-[#faf5f2]" : "border-r border-[#c8b3a7] bg-[#f3f8f7]"
       }`}
     >
       <div
-        className={`flex items-center justify-between border-b px-4 py-2.5 ${
-          isDebit
-            ? "border-[#d9c2b5] bg-[#ead8ce]"
-            : "border-[#b9d0cc] bg-[#dcece9]"
-        }`}
+        className={`flex items-center justify-between border-b px-4 py-2.5 ${toneHeaderBorder}`}
       >
         <span
-          className={`text-[11px] font-bold uppercase tracking-[0.14em] ${
-            isDebit ? "text-[#8f5039]" : "text-[#126c65]"
-          }`}
+          className={`text-[11px] font-bold uppercase tracking-[0.14em] ${toneText}`}
         >
           {title}
         </span>
         <span
-          className={`rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold ${
-            isDebit ? "text-[#9b5d44]" : "text-[#18776e]"
-          }`}
+          className={`rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold ${toneText}`}
         >
           {rows.length} entries
         </span>
       </div>
 
-      <table className="w-full text-left">
-        <thead>
-          <tr className="border-b border-[#123955] bg-[#18476A] text-xs font-bold uppercase tracking-wider text-white">
-            <th className="w-9 px-3.5 py-2.5">Check</th>
-            {textColumns.map((column) => (
-              <th key={column} className="whitespace-nowrap px-3.5 py-2.5">
-                {column}
+      {/* Scrollable DataTable-style body — sticky header + sticky checkbox
+          column, matching the Standard Tabular Grid View. */}
+      <div className="max-h-[560px] overflow-auto">
+        <table className="w-full min-w-full border-separate border-spacing-0 text-left">
+          <thead className="sticky top-0 z-20">
+            <tr className="bg-[#18476A] text-[10.5px] font-bold uppercase tracking-[0.08em] text-white">
+              <th className="sticky left-0 top-0 z-30 w-9 border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 whitespace-nowrap align-middle">
+                Check
               </th>
-            ))}
-            {numericKeys.map((nk) => (
-              <th
-                key={nk}
-                className="whitespace-nowrap px-3.5 py-2.5 text-right"
-              >
-                {nk}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(({ row, index, group }) => {
-            const groupIndices = getRelatedGroupIndices
-              ? getRelatedGroupIndices(index)
-              : [index];
-            const isFullyApproved =
-              groupIndices.length > 0 &&
-              groupIndices.every((idx) => selected.includes(idx));
-            const isPartiallyApproved =
-              !isFullyApproved &&
-              groupIndices.some((idx) => selected.includes(idx));
-            const isRowApproved = isFullyApproved || selected.includes(index);
-
-            const meta = rowGroupMeta?.get(index);
-            const groupId = meta?.groupId ?? index;
-            const band = getEntryBandStyle(groupId, entryColorPalette);
-            const user = getAuthUser();
-            const currentUserName =
-              user?.name || user?.email?.split("@")[0] || "BHAVESH";
-
-            return (
-              <tr
-                key={`${group}-${index}`}
-                className={`border-b border-black/5 transition ${
-                  isRowApproved
-                    ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
-                    : `${band.base} ${band.hover}`
-                }`}
-              >
-                <td
-                  className={`px-3.5 py-2.5 align-top ${
-                    !isRowApproved && entryColorPalette !== "none"
-                      ? band.border
-                      : ""
-                  }`}
+              {textColumns.map((column) => (
+                <th
+                  key={column}
+                  className="border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 whitespace-nowrap align-middle"
                 >
-                  <div className="flex flex-col items-start gap-1 whitespace-nowrap">
-                    <button
-                      type="button"
-                      onClick={() => toggleApproval(index)}
-                      title={
-                        isFullyApproved
-                          ? "Approved - click to deselect"
-                          : "Click to approve"
-                      }
-                      className={`grid h-4 w-4 place-items-center rounded border transition ${
-                        isFullyApproved
-                          ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
-                          : isPartiallyApproved
-                            ? "border-emerald-500 bg-emerald-100 text-emerald-800 shadow-xs"
-                            : "border-slate-400 bg-white text-transparent hover:border-slate-600"
-                      }`}
-                    >
-                      <Check size={12} strokeWidth={3} />
-                    </button>
-                    {isRowApproved && (
-                      <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
-                        By - {currentUserName}
-                      </span>
-                    )}
-                  </div>
-                </td>
-                {textColumns.map((column) => (
+                  {column}
+                </th>
+              ))}
+              {activeNumericKeys.map((nk) => (
+                <th
+                  key={nk}
+                  className="border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 text-right whitespace-nowrap align-middle"
+                >
+                  {nk}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {renderItems.map((item) => {
+              const { row, index, group, groupId, bandIndex, isNewEntryStart } =
+                item;
+              const groupIndices = getRelatedGroupIndices
+                ? getRelatedGroupIndices(index)
+                : [index];
+              const isFullyApproved =
+                groupIndices.length > 0 &&
+                groupIndices.every((idx) => selected.includes(idx));
+              const isPartiallyApproved =
+                !isFullyApproved &&
+                groupIndices.some((idx) => selected.includes(idx));
+              const isRowApproved =
+                isFullyApproved || selected.includes(index);
+
+              const band = getEntryBandStyle(bandIndex, entryColorPalette);
+              const user = getAuthUser();
+              const currentUserName =
+                user?.name || user?.email?.split("@")[0] || "BHAVESH";
+
+              return (
+                <tr
+                  key={`${group}-${index}`}
+                  className={`transition-colors duration-150 ${
+                    isRowApproved
+                      ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
+                      : `${band.base} ${band.hover}`
+                  } ${
+                    isNewEntryStart
+                      ? "border-t-2 border-slate-300/80"
+                      : "border-t border-slate-100"
+                  } border-b border-slate-100`}
+                >
                   <td
-                    key={column}
-                    className="whitespace-nowrap px-3.5 py-2.5 align-top text-xs font-medium text-slate-700"
-                  >
-                    {column === transactionKey
-                      ? row[column] || group || "—"
-                      : row[column] || "—"}
-                  </td>
-                ))}
-                {numericKeys.map((nk) => (
-                  <td
-                    key={nk}
-                    className={`whitespace-nowrap px-3.5 py-2.5 text-right align-top text-xs font-bold ${
-                      isDebit ? "text-[#8f5039]" : "text-[#126c65]"
+                    className={`sticky left-0 bg-inherit px-3.5 py-2.5 align-top whitespace-nowrap ${
+                      !isRowApproved && entryColorPalette !== "none"
+                        ? band.border
+                        : ""
                     }`}
                   >
-                    {row[nk] || "—"}
+                    {isNewEntryStart && (
+                      <div className="flex flex-col items-start gap-1 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleApproval(index)}
+                            title={
+                              isFullyApproved
+                                ? `Entry #${groupId + 1} Approved (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""}) - click to deselect`
+                                : isPartiallyApproved
+                                  ? `Entry #${groupId + 1} Partially Selected - click to select all`
+                                  : `Approve Entry #${groupId + 1} (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""})`
+                            }
+                            className={`grid h-4 w-4 place-items-center rounded border transition ${
+                              isFullyApproved
+                                ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
+                                : isPartiallyApproved
+                                  ? "border-emerald-500 bg-emerald-100 text-emerald-800 shadow-xs"
+                                  : "border-slate-400 bg-white text-transparent hover:border-slate-600"
+                            }`}
+                          >
+                            {isPartiallyApproved ? (
+                              <Minus size={12} strokeWidth={3} />
+                            ) : (
+                              <Check size={12} strokeWidth={3} />
+                            )}
+                          </button>
+                          {canDelete && onDeleteRow && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteRow(index)}
+                              className="p-0.5 text-slate-400 hover:text-rose-600 transition rounded hover:bg-rose-50"
+                              title="Delete entry"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                        {isRowApproved && (
+                          <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
+                            By - {currentUserName}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  {textColumns.map((column) => (
+                    <td
+                      key={column}
+                      className="whitespace-nowrap px-3.5 py-2.5 align-top text-xs font-medium text-slate-700"
+                    >
+                      {column === transactionKey
+                        ? row[column] || group || "—"
+                        : row[column] || "—"}
+                    </td>
+                  ))}
+                  {activeNumericKeys.map((nk) => (
+                    <td
+                      key={nk}
+                      className={`whitespace-nowrap px-3.5 py-2.5 text-right align-top text-xs font-bold ${toneText}`}
+                    >
+                      {row[nk] || "—"}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       {!rows.length && (
         <p className="px-4 py-8 text-center text-xs text-slate-400">
           No {title.toLowerCase()} rows in this report.
@@ -1486,6 +1556,8 @@ interface LedgerTableViewProps {
   getRelatedGroupIndices?: (index: number) => number[];
   rowGroupMeta?: Map<number, GroupedRowMeta>;
   entryColorPalette?: EntryColorPaletteKey;
+  onDeleteRow?: (index: number) => void;
+  canDelete?: boolean;
 }
 
 function LedgerTableView({
@@ -1499,8 +1571,9 @@ function LedgerTableView({
   getRelatedGroupIndices,
   rowGroupMeta,
   entryColorPalette,
+  onDeleteRow,
+  canDelete = false,
 }: LedgerTableViewProps) {
-  // Helper numeric parser
   const parseAmt = (val: any) => {
     if (!val) return 0;
     const num = parseFloat(String(val).replace(/[^0-9.-]+/g, ""));
@@ -1516,8 +1589,14 @@ function LedgerTableView({
 
   const displayCols = columns.filter((c) => c !== "_originalIndex");
 
-  // Identify all numeric keys in the rows (e.g. Gr. Wt., Net Wt., Fine, Amt, Credit, Debit)
   const numericKeys = displayCols.filter((col) => {
+    if (
+      /date|time|year|month|day|sr|sl|code|id|ref|vou|doc|audit/i.test(
+        col.trim(),
+      )
+    ) {
+      return false;
+    }
     if (
       /wt|weight|fine|amt|amount|price|credit|debit|total|cost|balance/i.test(
         col,
@@ -1526,9 +1605,12 @@ function LedgerTableView({
       return true;
     const sample = rows.slice(0, 10);
     if (!sample.length) return false;
-    const numCount = sample.filter(
-      (r) => !isNaN(parseFloat(String(r[col]))),
-    ).length;
+    const numCount = sample.filter((r) => {
+      const val = String(r[col] ?? "").trim();
+      if (!val) return false;
+      if (/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(val)) return false;
+      return !isNaN(Number(val));
+    }).length;
     return numCount > sample.length * 0.5;
   });
 
@@ -1548,7 +1630,7 @@ function LedgerTableView({
     );
 
   let currentGroup = "";
-  const entries = rows.map((row, loopIndex) => {
+  const allEntries = rows.map((row, loopIndex) => {
     const origIndex =
       typeof row._originalIndex === "number"
         ? (row._originalIndex as number)
@@ -1559,8 +1641,17 @@ function LedgerTableView({
       row[transactionKey]?.trim() ||
       "";
     if (value && !/total/i.test(value)) currentGroup = value;
-    return { row, index: origIndex, group: currentGroup };
+    const meta = rowGroupMeta?.get(origIndex);
+    return {
+      row,
+      index: origIndex,
+      group: currentGroup,
+      groupId: meta?.groupId ?? origIndex,
+      isTotalRow: meta?.isTotalRow ?? false,
+    };
   });
+
+  const entries = allEntries.filter((e) => !e.isTotalRow);
 
   const debit = entries.filter(({ row }) => {
     if (
@@ -1640,7 +1731,6 @@ function LedgerTableView({
     return false;
   });
 
-  // Fallback categorization for unassigned rows
   const unassigned = entries.filter(
     (e) => !debit.includes(e) && !credit.includes(e),
   );
@@ -1701,7 +1791,6 @@ function LedgerTableView({
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[1040px]">
-        {/* Top Header Banner matching existing UI */}
         <div className="flex items-center justify-between border-b border-[#095f5a] bg-[#0e776f] px-5 py-3 text-white">
           <div>
             <p className="text-xs font-bold">Dynamic report ledger</p>
@@ -1728,8 +1817,9 @@ function LedgerTableView({
             selected={selected}
             toggleApproval={toggleApproval}
             getRelatedGroupIndices={getRelatedGroupIndices}
-            rowGroupMeta={rowGroupMeta}
             entryColorPalette={entryColorPalette}
+            onDeleteRow={onDeleteRow}
+            canDelete={canDelete}
           />
           <LedgerPane
             title="Debit report"
@@ -1743,20 +1833,21 @@ function LedgerTableView({
             selected={selected}
             toggleApproval={toggleApproval}
             getRelatedGroupIndices={getRelatedGroupIndices}
-            rowGroupMeta={rowGroupMeta}
             entryColorPalette={entryColorPalette}
+            onDeleteRow={onDeleteRow}
+            canDelete={canDelete}
           />
         </div>
 
-        {/* Dynamic Ledger Summary Footer */}
-        <div className="border-t border-[#c8b3a7] bg-white text-xs">
+        {/* Dynamic Ledger Summary Footer — whole-report calculation */}
+        <div className="border-t-2 border-[#18476A] bg-[#f8fafc] text-xs font-sans shadow-xs">
           {/* Row 1: Verify / Unverify / Sub Total */}
-          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-slate-200">
+          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
             {/* Credit Side (left) */}
-            <div className="grid grid-cols-4 items-center px-2 py-2 text-slate-700">
+            <div className="grid grid-cols-4 items-center bg-[#edf6f4] px-3 py-2 text-slate-700">
               <div className="text-center font-medium">
                 Verify :{" "}
-                <span className="font-bold text-[#18476A]">
+                <span className="font-bold text-[#126c65]">
                   {formatNum(creditVerified, isWeight)}
                 </span>
               </div>
@@ -1766,18 +1857,18 @@ function LedgerTableView({
                   {formatNum(creditUnverified, isWeight)}
                 </span>
               </div>
-              <div className="text-right font-bold text-slate-800 pr-2">
+              <div className="text-right font-bold text-[#0f524d] pr-2">
                 Sub Total
               </div>
-              <div className="text-right font-bold text-slate-900 pr-2">
+              <div className="text-right font-extrabold text-[#0c4440] font-mono text-[12.5px] pr-2">
                 {formatNum(creditSubTotal, isWeight)}
               </div>
             </div>
             {/* Debit Side (right) */}
-            <div className="grid grid-cols-4 items-center px-2 py-2 text-slate-700">
+            <div className="grid grid-cols-4 items-center bg-[#f6ece6] px-3 py-2 text-slate-700">
               <div className="text-center font-medium">
                 Verify :{" "}
-                <span className="font-bold text-[#18476A]">
+                <span className="font-bold text-[#8f5039]">
                   {formatNum(debitVerified, isWeight)}
                 </span>
               </div>
@@ -1787,45 +1878,49 @@ function LedgerTableView({
                   {formatNum(debitUnverified, isWeight)}
                 </span>
               </div>
-              <div className="text-right font-bold text-slate-800 pr-2">
+              <div className="text-right font-bold text-[#733f2b] pr-2">
                 Sub Total
               </div>
-              <div className="text-right font-bold text-slate-900 pr-2">
+              <div className="text-right font-extrabold text-[#5c3121] font-mono text-[12.5px] pr-2">
                 {formatNum(debitSubTotal, isWeight)}
               </div>
             </div>
           </div>
 
           {/* Row 2: Total Issue / Total Receipt */}
-          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-slate-200">
+          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
             {/* Credit Side Total Issue (left) */}
-            <div className="grid grid-cols-4 items-center px-2 py-2">
-              <div className="col-span-3 text-right font-bold text-slate-800 pr-2">
+            <div className="grid grid-cols-4 items-center bg-[#e1f1ed] px-3 py-2.5">
+              <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#0e5c56] pr-2">
                 Total Issue
               </div>
-              <div className="text-right font-bold text-slate-900 pr-2">
+              <div className="text-right font-black text-[#083c38] font-mono text-[13px] pr-2">
                 {formatNum(creditSubTotal, isWeight)}
               </div>
             </div>
             {/* Debit Side Total Receipt (right) */}
-            <div className="grid grid-cols-4 items-center px-2 py-2">
-              <div className="col-span-3 text-right font-bold text-slate-800 pr-2">
+            <div className="grid grid-cols-4 items-center bg-[#f3e3d9] px-3 py-2.5">
+              <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#7e432d] pr-2">
                 Total Receipt
               </div>
-              <div className="text-right font-bold text-slate-900 pr-2">
+              <div className="text-right font-black text-[#522919] font-mono text-[13px] pr-2">
                 {formatNum(debitSubTotal, isWeight)}
               </div>
             </div>
           </div>
 
           {/* Row 3: Closing Balance */}
-          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7]">
-            <div></div>
-            <div className="grid grid-cols-4 items-center px-2 py-2">
-              <div className="col-span-3 text-right font-bold text-slate-800 pr-2">
+          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] bg-[#18476A] text-white">
+            <div className="flex items-center justify-between px-4 py-2 bg-[#0f344f]">
+              <span className="text-[10.5px] font-semibold text-teal-200/90 uppercase tracking-widest">
+                Ledger Balance Summary
+              </span>
+            </div>
+            <div className="grid grid-cols-4 items-center bg-[#18476A] px-3 py-2.5">
+              <div className="col-span-3 text-right font-black uppercase tracking-wider text-[11.5px] text-amber-300 pr-2">
                 Closing Balance
               </div>
-              <div className="text-right font-bold text-slate-900 pr-2">
+              <div className="text-right font-black font-mono text-[14px] text-white pr-2">
                 {formatNum(closingBalance, isWeight)}
               </div>
             </div>
@@ -1853,7 +1948,6 @@ export function DynamicReportViewer({
 }) {
   type ReportRow = Record<string, any>;
 
-  // ── References & Data States ────────────────────────────────────────────────
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [savedReports, setSavedReports] = useState<ReportItem[]>([]);
@@ -1879,7 +1973,6 @@ export function DynamicReportViewer({
     "melting" | "standard"
   >("melting");
 
-  // Dynamic Database Filters State
   const [filterOptions, setFilterOptions] = useState<{
     types: string[];
     owners: string[];
@@ -1889,13 +1982,40 @@ export function DynamicReportViewer({
   const [selectedOwner, setSelectedOwner] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
 
-  // Date range filter states (defaults to current date)
   const getTodayDateString = () => {
     const today = new Date();
     const year = today.getFullYear();
     const month = String(today.getMonth() + 1).padStart(2, "0");
     const day = String(today.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
+  };
+
+  const extractReportDate = (rows: Record<string, any>[]): string | null => {
+    if (!rows || !rows.length) return null;
+    const sample = rows.slice(0, 30);
+    const dateCol = Object.keys(sample[0] || {}).find((k) =>
+      /date|dt|time|day/i.test(k.trim()),
+    );
+    if (!dateCol) return null;
+
+    for (const r of sample) {
+      const val = String(r[dateCol] ?? "").trim();
+      if (!val || val === "—" || val === "-") continue;
+
+      const ddmmyyyy = val.match(/^(\d{1,2})[/\-. ](\d{1,2})[/\-. ](\d{4})$/);
+      if (ddmmyyyy) {
+        const [, d, m, y] = ddmmyyyy;
+        return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+      }
+
+      const yyyymmdd = val.match(/^(\d{4})[/\-. ](\d{1,2})[/\-. ](\d{1,2})$/);
+      if (yyyymmdd) {
+        const [, y, m, d] = yyyymmdd;
+        return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+      }
+    }
+
+    return null;
   };
 
   const [startDate, setStartDate] = useState<string>(getTodayDateString());
@@ -1909,7 +2029,6 @@ export function DynamicReportViewer({
     window.setTimeout(() => setNotice(""), 2500);
   };
 
-  // ── Fetch dynamic filter options from backend database (date-wise) ─────────────
   const loadFilterOptions = async (sDate?: string, eDate?: string) => {
     try {
       const s = sDate !== undefined ? sDate : startDate;
@@ -1935,7 +2054,6 @@ export function DynamicReportViewer({
     loadFilterOptions(startDate, endDate);
   }, [startDate, endDate]);
 
-  // Derived list of report types available for the selected date range
   const availableReportTypes = useMemo(() => {
     const set = new Set<string>();
     if (Array.isArray(savedReports)) {
@@ -1952,7 +2070,6 @@ export function DynamicReportViewer({
     return Array.from(set).sort();
   }, [savedReports, filterOptions.types]);
 
-  // ── Fetch saved reports dynamically from database with filters ──────────────
   const loadSavedReports = async (
     sDate?: string,
     eDate?: string,
@@ -1993,7 +2110,6 @@ export function DynamicReportViewer({
               selectReport(data.data[0]);
             }
           } else {
-            // No reports found for selected filter parameters
             setRows([]);
             setFileName("");
             setSelectedReportId("");
@@ -2019,7 +2135,20 @@ export function DynamicReportViewer({
     );
   }, [startDate, endDate, selectedType, selectedOwner, selectedStatus, query]);
 
-  // ── Load selected report details ───────────────────────────────────────────
+  const refreshAllData = async (
+    sDate?: string,
+    eDate?: string,
+    typeVal?: string,
+    ownerVal?: string,
+    statusVal?: string,
+    searchVal?: string,
+  ) => {
+    await Promise.all([
+      loadFilterOptions(sDate !== undefined ? sDate : startDate, eDate !== undefined ? eDate : endDate),
+      loadSavedReports(sDate, eDate, typeVal, ownerVal, statusVal, searchVal),
+    ]);
+  };
+
   const selectReport = async (report: ReportItem) => {
     const id = report._id || report.reportId || "";
     setSelectedReportId(id);
@@ -2027,7 +2156,6 @@ export function DynamicReportViewer({
     setFileName(report.name);
     setActiveReportMeta(report);
     setActiveHeaderStructure((report as any).headerStructure || null);
-    // Restore this report's original saved column order/set
     if (Array.isArray(report.headers) && report.headers.length > 0) {
       setActiveReportHeaders(report.headers);
     } else {
@@ -2117,7 +2245,6 @@ export function DynamicReportViewer({
             if (fetchedReport.headerStructure) {
               setActiveHeaderStructure(fetchedReport.headerStructure);
             }
-            // Restore the original column order saved at upload time
             if (
               Array.isArray(fetchedReport.headers) &&
               fetchedReport.headers.length > 0
@@ -2165,7 +2292,6 @@ export function DynamicReportViewer({
     toast(`Loaded report "${report.name}"`);
   };
 
-  // ── Parse & Apply Spreadsheet Upload ────────────────────────────────────────
   const parseWorkbook = (buffer: ArrayBuffer) => {
     const workbook = XLSX.read(buffer, { type: "array" });
     const sheetName = workbook.SheetNames[0];
@@ -2224,7 +2350,6 @@ export function DynamicReportViewer({
     setRows(processedRows);
     setFileName(cleanName);
     setSelectedReportId("new_upload");
-    // Save original column order for this freshly uploaded report
     setActiveReportHeaders(headers);
     setViewMode("auto");
     const uploadDate = getTodayDateString();
@@ -2252,7 +2377,6 @@ export function DynamicReportViewer({
       backendMsg = `${parsed.length} rows detected — only the first 500 are saved to the server (local view shows all)`;
     }
 
-    // Clean filled data to save to backend (without internal metadata _originalIndex)
     const cleanBackendData = processedRows.slice(0, 500).map((r) => {
       const copy = { ...r };
       delete copy._originalIndex;
@@ -2283,18 +2407,29 @@ export function DynamicReportViewer({
             "Purity",
           ];
 
-      // NOTE: mainHeaders/levels are intentionally left untouched here.
-      // Purity is a standalone trailing column, not part of the [B] In /
-      // [C] Out grouping — the grid header renderer adds it as its own
-      // separate cell (beside the group headers) based on gridDisplayColumns,
-      // so we must not fold it into the last group's colSpan or it will
-      // render as if it belongs inside "[C] Out".
       backendHeaderStructure = {
         ...headerStructure,
         subHeaders: updatedSubHeaders,
       };
     }
     setActiveHeaderStructure(backendHeaderStructure);
+
+    const extractedDate = extractReportDate(cleanBackendData);
+    const reportDate = extractedDate || startDate || getTodayDateString();
+
+    let targetStartDate = startDate;
+    let targetEndDate = endDate;
+
+    if (reportDate) {
+      if (!targetStartDate || reportDate < targetStartDate) {
+        targetStartDate = reportDate;
+        setStartDate(reportDate);
+      }
+      if (!targetEndDate || reportDate > targetEndDate) {
+        targetEndDate = reportDate;
+        setEndDate(reportDate);
+      }
+    }
 
     try {
       const currentUser = getAuthUser();
@@ -2309,6 +2444,7 @@ export function DynamicReportViewer({
           data: cleanBackendData,
           headers: backendHeaders,
           headerStructure: backendHeaderStructure,
+          createdAt: reportDate,
         }),
       });
       const data = await res.json();
@@ -2318,7 +2454,7 @@ export function DynamicReportViewer({
         if (parsed.length <= 500) {
           backendMsg = `Report "${cleanName}" uploaded and saved to backend!`;
         }
-        loadSavedReports();
+        await refreshAllData(targetStartDate, targetEndDate);
       } else {
         backendMsg = `Parsed locally, but saving to backend failed${
           data?.error ? `: ${data.error}` : ""
@@ -2334,18 +2470,12 @@ export function DynamicReportViewer({
   const handleUpload = async (file?: File) => {
     if (!file) return;
     await applyWorkbook(await file.arrayBuffer(), file.name);
-    // Reset the input value so re-selecting the same file fires onChange again
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  // ── Column & Key Detections ──────────────────────────────────────────────────
-  // Priority 1: use the headers saved at upload time (preserves original order
-  // and column set specific to each report type).
-  // Priority 2: fall back to deriving from row keys (for legacy / direct uploads).
   const columns = useMemo(() => {
     if (!rows.length) return [];
 
-    // Derive the full column set from row keys as a reference/fallback
     const rowDerivedCols = Array.from(
       new Set(
         rows.flatMap((row) =>
@@ -2359,15 +2489,11 @@ export function DynamicReportViewer({
       }),
     );
 
-    // If this report has saved headers (its own column list from upload),
-    // use them — but only keep the ones that actually appear in the row data.
     if (activeReportHeaders.length > 0) {
       const rowColSet = new Set(rowDerivedCols);
       const fromSaved = activeReportHeaders.filter(
         (h) => h !== "_originalIndex" && rowColSet.has(h),
       );
-      // Append any extra columns present in rows but missing from saved headers
-      // (e.g. a computed "Purity" column added after upload)
       const savedSet = new Set(fromSaved);
       const extras = rowDerivedCols.filter((c) => !savedSet.has(c));
       return extras.length > 0 ? [...fromSaved, ...extras] : fromSaved;
@@ -2408,7 +2534,6 @@ export function DynamicReportViewer({
     [columns],
   );
 
-  // ── Melting Report Multi-Level Header & Purity Calculations ────────────────
   const MEASURE_COL_REGEX =
     /pieces|weight|wt|fine|amt|amount|price|credit|debit|piece|pcs|qty|quantity/i;
 
@@ -2428,7 +2553,6 @@ export function DynamicReportViewer({
     if (!columns.length) return [];
 
     if (!isMelting) {
-      // Purity is ONLY for Melting Reports — strictly filter out any "Purity" column
       return columns.filter((c) => !/purity/i.test(c));
     }
 
@@ -2490,10 +2614,6 @@ export function DynamicReportViewer({
     return meltingColumns.filter((c) => MEASURE_COL_REGEX.test(c));
   }, [meltingColumns]);
 
-  // With Purity positioned between IN and OUT, count each side's measure
-  // columns directly from its actual position rather than splitting the
-  // total in half — the two sides aren't always equal in length (e.g. IN
-  // has 3 fields, OUT has 3, or IN has 4 and OUT has 3).
   const inSpanCount = useMemo(() => {
     if (purityColIndex === -1) {
       return Math.max(1, Math.floor(measureCols.length / 2) || 3);
@@ -2532,11 +2652,6 @@ export function DynamicReportViewer({
     purityColIndex,
   ]);
 
-  // Only a genuine "Type" style column (e.g. "Type", "P.Type", "Dr/Cr") whose
-  // VALUES mark a row as a debit or credit entry qualifies a report for the
-  // Credit/Debit ledger table. A report that simply has separate "Credit" and
-  // "Debit" AMOUNT columns side-by-side on one row (e.g. Tools Purchase) is
-  // NOT an entry-level ledger — it belongs in the plain Grid table instead.
   const explicitEntryTypeColumn = useMemo(
     () =>
       columns.find((column) =>
@@ -2548,17 +2663,38 @@ export function DynamicReportViewer({
   );
 
   const hasCreditDebitEntries = useMemo(() => {
-    if (!rows.length || !explicitEntryTypeColumn) return false;
-    return rows.some((row) => {
-      const typeVal = String(row[explicitEntryTypeColumn] ?? "")
-        .trim()
-        .toLowerCase();
-      if (!typeVal) return false;
-      return /credit|debit|\bcr\b|\bdr\b|receipt|payment|issue|receive|\[01\]|\[02\]/.test(
-        typeVal,
-      );
-    });
-  }, [rows, explicitEntryTypeColumn]);
+    if (!rows.length) return false;
+
+    if (explicitEntryTypeColumn) {
+      const hasTypeVal = rows.some((row) => {
+        const typeVal = String(row[explicitEntryTypeColumn] ?? "")
+          .trim()
+          .toLowerCase();
+        if (!typeVal) return false;
+        return /credit|debit|\bcr\b|\bdr\b|receipt|payment|issue|receive|\[01\]|\[02\]/.test(
+          typeVal,
+        );
+      });
+      if (hasTypeVal) return true;
+    }
+
+    const hasDebitCol = columns.some((c) =>
+      /debit|dr\.?$/i.test(c.trim()),
+    );
+    const hasCreditCol = columns.some((c) =>
+      /credit|cr\.?$/i.test(c.trim()),
+    );
+    if (hasDebitCol || hasCreditCol) return true;
+
+    if (
+      activeHeaderStructure?.hasCreditDebit ||
+      activeHeaderStructure?.layoutMode === "ledger"
+    ) {
+      return true;
+    }
+
+    return false;
+  }, [rows, explicitEntryTypeColumn, columns, activeHeaderStructure]);
 
   const effectiveViewMode =
     viewMode === "auto"
@@ -2567,9 +2703,6 @@ export function DynamicReportViewer({
         : "grid"
       : viewMode;
 
-  // ── Entry grouping (background bands, subtotal rows, grand total) ──────────
-  // Detected once from the full dataset (not the filtered/search subset) so
-  // bands stay stable while the user types in the search box.
   const groupKeyColumn = useMemo(
     () => detectGroupKeyColumn(rows, columns),
     [rows, columns],
@@ -2585,11 +2718,9 @@ export function DynamicReportViewer({
     [rows, columns],
   );
 
-  // ── Filtering Logic ────────────────────────────────────────────────────────
   const filteredRows = useMemo(
     () =>
       rows.filter((row) => {
-        // Global search query
         if (query.trim()) {
           const q = query.toLowerCase();
           const matchesQuery = Object.entries(row).some(([k, val]) => {
@@ -2603,7 +2734,6 @@ export function DynamicReportViewer({
     [rows, query],
   );
 
-  // Grid view should show only the actual entry rows — excluding subtotal/total rows from source data
   const visibleGridRows = useMemo(
     () =>
       filteredRows.filter((row, index) => {
@@ -2627,7 +2757,6 @@ export function DynamicReportViewer({
     [filteredRows, rowGroupMeta, columns],
   );
 
-  // Computed Grand Totals calculated dynamically directly from visibleGridRows
   const grandTotals = useMemo(() => {
     const totals: Record<string, number> = {};
     numericColumnsForTotals.forEach((col) => (totals[col] = 0));
@@ -2645,10 +2774,10 @@ export function DynamicReportViewer({
   }, [visibleGridRows, numericColumnsForTotals]);
 
   const grandTotalPurity = useMemo(() => {
-    return "0";
-  }, []);
+    if (!isMelting || !visibleGridRows.length) return "—";
+    return calculateOverallPurity(visibleGridRows, columns);
+  }, [isMelting, visibleGridRows, columns]);
 
-  // ── Handlers & Actions ─────────────────────────────────────────────────────
   const getRelatedGroupIndices = (targetIndex: number): number[] => {
     const targetGroupId = rowGroupMeta.get(targetIndex)?.groupId;
 
@@ -2716,6 +2845,62 @@ export function DynamicReportViewer({
       );
     } else {
       setSelected((prev) => Array.from(new Set([...prev, ...filteredIndices])));
+    }
+  };
+
+  const [deleteReportModalOpen, setDeleteReportModalOpen] = useState(false);
+  const [deletingReport, setDeletingReport] = useState(false);
+
+  const handleDeleteReport = () => {
+    const targetId =
+      selectedReportId || reportId || activeReportMeta?._id || activeReportMeta?.reportId;
+    if (!targetId) {
+      setNotice("No report is currently loaded to delete.");
+      window.setTimeout(() => setNotice(""), 3000);
+      return;
+    }
+    setDeleteReportModalOpen(true);
+  };
+
+  const confirmDeleteReport = async () => {
+    const targetId =
+      selectedReportId || reportId || activeReportMeta?._id || activeReportMeta?.reportId;
+    if (!targetId) return;
+
+    setDeletingReport(true);
+    try {
+      const res = await authFetch(`/api/reports/${targetId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNotice(
+          data.message ||
+            `Report '${fileName || activeReportMeta?.name || "Report"}' deleted successfully.`,
+        );
+        window.setTimeout(() => setNotice(""), 4000);
+
+        setRows([]);
+        setSelectedReportId("");
+        setReportId("");
+        setFileName("");
+        setActiveReportMeta(null);
+        setActiveHeaderStructure(null);
+        setActiveReportHeaders([]);
+        setSelected([]);
+
+        await refreshAllData();
+      } else {
+        setNotice(data.error || "Failed to delete report.");
+        window.setTimeout(() => setNotice(""), 4000);
+      }
+    } catch (err) {
+      console.error("Delete report error:", err);
+      setNotice("Error deleting report.");
+      window.setTimeout(() => setNotice(""), 4000);
+    } finally {
+      setDeletingReport(false);
+      setDeleteReportModalOpen(false);
     }
   };
 
@@ -2934,13 +3119,41 @@ export function DynamicReportViewer({
               </button>
             )}
 
+            {/* Single Report Delete Button */}
+            {permissions.delete && (
+              <button
+                type="button"
+                disabled={!(selectedReportId || reportId || activeReportMeta)}
+                onClick={handleDeleteReport}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold transition shadow-xs ${
+                  selectedReportId || reportId || activeReportMeta
+                    ? "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-400 cursor-pointer"
+                    : "border-slate-200 bg-slate-50 text-slate-400 opacity-60 cursor-not-allowed"
+                }`}
+                title={
+                  selectedReportId || reportId || activeReportMeta
+                    ? `Delete entire report "${fileName || activeReportMeta?.name || ""}"`
+                    : "No active report selected to delete"
+                }
+              >
+                <Trash2
+                  size={14}
+                  className={
+                    selectedReportId || reportId || activeReportMeta
+                      ? "text-rose-600"
+                      : "text-slate-400"
+                  }
+                />
+                Delete Report
+              </button>
+            )}
+
             {/* Refresh Button */}
             <button
-              onClick={() => {
+              onClick={async () => {
+                await refreshAllData();
                 if (activeReportMeta) {
                   selectReport(activeReportMeta);
-                } else {
-                  loadSavedReports();
                 }
               }}
               title="Refresh report data"
@@ -2985,7 +3198,7 @@ export function DynamicReportViewer({
             {/* 1. Side-by-Side Financial Ledger View */}
             {effectiveViewMode === "ledger" && (
               <LedgerTableView
-                rows={filteredRows}
+                rows={visibleGridRows}
                 columns={columns}
                 transactionKey={transactionKey!}
                 typeKey={typeKey!}
@@ -2995,6 +3208,7 @@ export function DynamicReportViewer({
                 getRelatedGroupIndices={getRelatedGroupIndices}
                 rowGroupMeta={rowGroupMeta}
                 entryColorPalette={entryColorPalette}
+                canDelete={false}
               />
             )}
 
@@ -3333,32 +3547,34 @@ export function DynamicReportViewer({
                           >
                             {isNewEntryStart && (
                               <div className="flex flex-col items-start gap-1 whitespace-nowrap">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleApproval(origIndex)}
-                                  title={
-                                    isFullyApproved
-                                      ? `Entry #${groupId + 1} Approved (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""}) - click to deselect`
-                                      : isPartiallyApproved
-                                        ? `Entry #${groupId + 1} Partially Selected - click to select all`
-                                        : `Approve Entry #${groupId + 1} (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""})`
-                                  }
-                                  className={`grid h-5 w-5 place-items-center rounded border transition ${
-                                    isFullyApproved
-                                      ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
-                                      : isPartiallyApproved
-                                        ? "border-emerald-500 bg-emerald-100 text-emerald-800 shadow-sm"
-                                        : "border-slate-300 bg-white text-transparent hover:border-slate-400"
-                                  }`}
-                                >
-                                  {isFullyApproved ? (
-                                    <Check size={13} strokeWidth={3} />
-                                  ) : isPartiallyApproved ? (
-                                    <Minus size={13} strokeWidth={3} />
-                                  ) : (
-                                    <Check size={13} strokeWidth={3} />
-                                  )}
-                                </button>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleApproval(origIndex)}
+                                    title={
+                                      isFullyApproved
+                                        ? `Entry #${groupId + 1} Approved (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""}) - click to deselect`
+                                        : isPartiallyApproved
+                                          ? `Entry #${groupId + 1} Partially Selected - click to select all`
+                                          : `Approve Entry #${groupId + 1} (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""})`
+                                    }
+                                    className={`grid h-5 w-5 place-items-center rounded border transition ${
+                                      isFullyApproved
+                                        ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
+                                        : isPartiallyApproved
+                                          ? "border-emerald-500 bg-emerald-100 text-emerald-800 shadow-sm"
+                                          : "border-slate-300 bg-white text-transparent hover:border-slate-400"
+                                    }`}
+                                  >
+                                    {isFullyApproved ? (
+                                      <Check size={13} strokeWidth={3} />
+                                    ) : isPartiallyApproved ? (
+                                      <Minus size={13} strokeWidth={3} />
+                                    ) : (
+                                      <Check size={13} strokeWidth={3} />
+                                    )}
+                                  </button>
+                                </div>
                                 {isRowApproved && (
                                   <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
                                     By - {currentUserName}
@@ -3379,7 +3595,10 @@ export function DynamicReportViewer({
                               rawRowPurity !== "—" &&
                               rawRowPurity !== "-" &&
                               rawRowPurity.toLowerCase() !== "null" &&
-                              rawRowPurity.toLowerCase() !== "undefined";
+                              rawRowPurity.toLowerCase() !== "undefined" &&
+                              rawRowPurity !== "0.00%" &&
+                              rawRowPurity !== "0%" &&
+                              rawRowPurity !== "0";
 
                             const purityValue = isPurityCol
                               ? hasRowPurity
@@ -3572,6 +3791,56 @@ export function DynamicReportViewer({
           </>
         )}
       </div>
+
+      {/* ── Report Delete Confirmation Modal ── */}
+      {deleteReportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl animate-in zoom-in-95 border border-slate-100">
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-100">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete Entire Report</h3>
+                <p className="text-xs text-slate-500">
+                  {fileName || activeReportMeta?.name || "Selected Report"}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
+              Are you sure you want to permanently delete the report{" "}
+              <strong className="text-slate-900 font-semibold">
+                "{fileName || activeReportMeta?.name || "this report"}"
+              </strong>
+              ? This action will remove the entire report document from the system.
+            </p>
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={deletingReport}
+                onClick={() => setDeleteReportModalOpen(false)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingReport}
+                onClick={confirmDeleteReport}
+                className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 shadow-md shadow-rose-600/20 transition flex items-center gap-2"
+              >
+                {deletingReport ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" /> Deleting...
+                  </>
+                ) : (
+                  "Yes, Delete Report"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,10 @@ import { syncReportTypes } from "../utils/reportTypeSyncer";
 
 export const reportsRouter = Router();
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // GET /api/reports — List all reports with dynamic database filtering
 reportsRouter.get("/", async (req, res) => {
   try {
@@ -24,14 +28,16 @@ reportsRouter.get("/", async (req, res) => {
 
     if (type && typeof type === "string" && type.trim() && type !== "All") {
       const cleanType = type.trim();
+      const escapedType = escapeRegex(cleanType);
       queryFilter.$or = [
-        { type: { $regex: cleanType, $options: "i" } },
-        { name: { $regex: cleanType, $options: "i" } },
+        { type: { $regex: escapedType, $options: "i" } },
+        { name: { $regex: escapedType, $options: "i" } },
       ];
     }
 
     if (owner && typeof owner === "string" && owner.trim() && owner !== "All") {
-      queryFilter.owner = { $regex: owner.trim(), $options: "i" };
+      const escapedOwner = escapeRegex(owner.trim());
+      queryFilter.owner = { $regex: escapedOwner, $options: "i" };
     }
 
     if (status && typeof status === "string" && status.trim() && status !== "All") {
@@ -39,7 +45,7 @@ reportsRouter.get("/", async (req, res) => {
     }
 
     if (search && typeof search === "string" && search.trim()) {
-      const q = search.trim();
+      const q = escapeRegex(search.trim());
       const searchOr = [
         { name: { $regex: q, $options: "i" } },
         { type: { $regex: q, $options: "i" } },
@@ -169,7 +175,7 @@ reportsRouter.get("/:id", async (req, res) => {
 // POST /api/reports — Create report
 reportsRouter.post("/", async (req: AuthRequest, res) => {
   try {
-    const { name, type, source, owner, data, headers, headerStructure } = req.body;
+    const { name, type, source, owner, data, headers, headerStructure, createdAt } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({
         success: false,
@@ -179,6 +185,14 @@ reportsRouter.post("/", async (req: AuthRequest, res) => {
 
     const cleanName = name.trim();
     const reportId = `REP-${Date.now().toString(36).toUpperCase()}`;
+
+    let customCreatedAt: Date | undefined;
+    if (createdAt && typeof createdAt === "string" && createdAt.trim()) {
+      const parsed = new Date(createdAt.trim());
+      if (!isNaN(parsed.getTime())) {
+        customCreatedAt = parsed;
+      }
+    }
 
     // Enrich melting report data with Purity field structure before saving to DB
     const enriched = enrichMeltingReportPurity(
@@ -199,7 +213,7 @@ reportsRouter.post("/", async (req: AuthRequest, res) => {
       data: enriched.data || [],
       headers: enriched.headers || [],
       headerStructure: enriched.headerStructure as unknown as HeaderStructure | undefined,
-      createdAt: new Date().toISOString(),
+      createdAt: (customCreatedAt || new Date()).toISOString(),
     };
 
     const dbStatus = getDBStatus();
@@ -221,6 +235,7 @@ reportsRouter.post("/", async (req: AuthRequest, res) => {
       data: reportObj.data,
       headers: reportObj.headers,
       headerStructure: reportObj.headerStructure as unknown as Record<string, unknown>,
+      ...(customCreatedAt ? { createdAt: customCreatedAt } : {}),
     });
 
     await syncReportTypes();
@@ -456,8 +471,23 @@ function enrichMeltingReportPurity(
     return allKeys.find((c) => fallbackRegex.test(c.trim()));
   };
 
-  const inWeightCol = findColumn(["Weight"], /^weight$/i) || allKeys.find((c) => /in.*wt|weight/i.test(c.trim()));
-  const outPureWeightCol = findColumn(["Pure Wt (2)", "Pure Weight (2)"], /^pure\s*(wt|weight)\s*\(2\)$/i) || allKeys.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
+  const pureWtCols = allKeys.filter((c) => /pure\s*(wt|weight)/i.test(c.trim()));
+  let outPureWeightCol =
+    findColumn(["Pure Wt (2)", "Pure Weight (2)"], /^pure\s*(wt|weight)\s*\(2\)$/i) ||
+    allKeys.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
+
+  if (!outPureWeightCol && pureWtCols.length > 1) {
+    outPureWeightCol = pureWtCols[pureWtCols.length - 1];
+  } else if (!outPureWeightCol && pureWtCols.length === 1) {
+    outPureWeightCol = pureWtCols[0];
+  }
+
+  const weightCols = allKeys.filter((c) => /^weight$|in.*wt/i.test(c.trim()) && !/pure/i.test(c));
+  let inWeightCol =
+    findColumn(["Weight"], /^weight$/i) ||
+    allKeys.find((c) => /in.*wt/i.test(c.trim())) ||
+    weightCols[0];
+
   const hasPurityCol = allKeys.some((c) => /purity/i.test(c.trim()));
 
   // Dynamically check if the report features weight/purity calculations; otherwise preserve raw data untouched
@@ -472,14 +502,18 @@ function enrichMeltingReportPurity(
   // TransNo grouping totals calculation
   const transNoTotals = new Map<string, { totalIn: number; totalOutPure: number }>();
   if (transNoCol && inWeightCol && outPureWeightCol) {
+    let currentTransNo = "";
     rawData.forEach((row) => {
-      const transNo = String(row[transNoCol] ?? "").trim();
-      if (!transNo) return;
-
-      if (!transNoTotals.has(transNo)) {
-        transNoTotals.set(transNo, { totalIn: 0, totalOutPure: 0 });
+      const rawTrans = String(row[transNoCol] ?? "").trim();
+      if (rawTrans) {
+        currentTransNo = rawTrans;
       }
-      const totals = transNoTotals.get(transNo)!;
+      if (!currentTransNo) return;
+
+      if (!transNoTotals.has(currentTransNo)) {
+        transNoTotals.set(currentTransNo, { totalIn: 0, totalOutPure: 0 });
+      }
+      const totals = transNoTotals.get(currentTransNo)!;
 
       const inW = parseNum(row[inWeightCol]);
       if (inW > 0) totals.totalIn += inW;
@@ -492,9 +526,14 @@ function enrichMeltingReportPurity(
     });
   }
 
+  let currentTransNo = "";
   const enrichedData = rawData.map((row) => {
     const copy = { ...row };
-    const transNo = transNoCol ? String(row[transNoCol] ?? "").trim() : "";
+    const rawTrans = transNoCol ? String(row[transNoCol] ?? "").trim() : "";
+    if (rawTrans) {
+      currentTransNo = rawTrans;
+    }
+    const transNo = currentTransNo;
     let purityStr = "—";
 
     if (transNo && transNoTotals.has(transNo)) {
@@ -513,7 +552,8 @@ function enrichMeltingReportPurity(
       }
     }
 
-    if (!copy["Purity"] && !copy["purity"]) {
+    const currentPurity = String(copy["Purity"] || copy["purity"] || "").trim();
+    if (!currentPurity || currentPurity === "0.00%" || currentPurity === "0%" || currentPurity === "0") {
       copy["Purity"] = purityStr;
     }
     return copy;

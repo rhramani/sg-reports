@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
@@ -17,6 +17,8 @@ import {
   LayoutDashboard,
   Menu,
   MoreVertical,
+  PanelLeft,
+  PanelLeftClose,
   Pencil,
   Plus,
   Search,
@@ -1105,11 +1107,56 @@ function ModulePage({
   );
 }
 
+const moduleToPathMap: Record<string, string> = {
+  Dashboard: "/",
+  Reports: "/reports",
+  Approvals: "/approvals",
+  Users: "/users",
+  Roles: "/roles",
+  Permissions: "/permissions",
+  "Report types": "/report-types",
+  "Activity Log": "/activity-log",
+  Profile: "/profile",
+};
+
+const pathToModuleMap: Record<string, string> = {
+  "/": "Dashboard",
+  "/dashboard": "Dashboard",
+  "/reports": "Reports",
+  "/approvals": "Approvals",
+  "/users": "Users",
+  "/roles": "Roles",
+  "/permissions": "Permissions",
+  "/report-types": "Report types",
+  "/activity-log": "Activity Log",
+  "/profile": "Profile",
+};
+
 export default function Index() {
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
+
+  const getModuleFromPath = (pathname: string): string => {
+    const cleanPath = pathname.toLowerCase().replace(/\/$/, "") || "/";
+    return pathToModuleMap[cleanPath] ?? "Dashboard";
+  };
+
+  const activeNav = getModuleFromPath(location.pathname);
+
+  const navigateToModule = (moduleName: string, replace = false) => {
+    const targetPath = moduleToPathMap[moduleName] ?? "/";
+    navigate(targetPath, { replace });
+  };
+
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("sg_sidebar_open");
+      if (saved !== null) return saved === "true";
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
   const [profileOpen, setProfileOpen] = useState(false);
-  const [activeNav, setActiveNav] = useState("Dashboard");
   const [query, setQuery] = useState("");
   const [notifications, setNotifications] = useState(false);
   const [userPermissions, setUserPermissions] = useState<Record<string, PermissionActions>>({});
@@ -1226,7 +1273,7 @@ export default function Index() {
       activeNav !== "Profile" &&
       activeNav !== "Activity Log"
     ) {
-      setActiveNav(allPermittedModules[0]);
+      navigateToModule(allPermittedModules[0], true);
     }
   }, [userPermissions, activeNav]);
 
@@ -1240,20 +1287,14 @@ export default function Index() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col bg-[#123955] text-white transition-transform duration-200 lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col bg-[#123955] text-white transition-all duration-300 ease-in-out shadow-2xl ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex h-[84px] items-center justify-between border-b border-white/10 px-5 py-3">
-          <div className="flex-1 flex items-center overflow-hidden pr-2">
+          <div className="flex-1 flex items-center overflow-hidden">
             <SGReportLogo size="full" variant="light" className="w-full" />
           </div>
-          <button
-            className="rounded-lg p-1 text-white/50 hover:bg-white/10 hover:text-white lg:hidden shrink-0"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <X size={18} />
-          </button>
         </div>
         <div className="px-4 pt-7">
           {visibleNavGroups.map((group) => (
@@ -1266,8 +1307,10 @@ export default function Index() {
                   <button
                     key={label}
                     onClick={() => {
-                      setActiveNav(label);
-                      setSidebarOpen(false);
+                      navigateToModule(label);
+                      if (window.innerWidth < 1024) {
+                        setSidebarOpen(false);
+                      }
                     }}
                     className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition ${
                       activeNav === label
@@ -1294,8 +1337,10 @@ export default function Index() {
           {getPermissionsForModule("Activity Log").view && (
             <button
               onClick={() => {
-                setActiveNav("Activity Log");
-                setSidebarOpen(false);
+                navigateToModule("Activity Log");
+                if (window.innerWidth < 1024) {
+                  setSidebarOpen(false);
+                }
               }}
               className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition ${
                 activeNav === "Activity Log"
@@ -1317,12 +1362,18 @@ export default function Index() {
         </div>
       </aside>
 
-      <main className="min-h-screen lg:pl-[248px]">
+      <main className={`min-h-screen transition-all duration-300 ease-in-out ${sidebarOpen ? "lg:pl-[248px]" : "lg:pl-0"}`}>
         <header className="sticky top-0 z-40 flex h-[76px] items-center justify-between border-b border-slate-200/80 bg-white/85 px-5 backdrop-blur-xl sm:px-8 lg:px-10">
           <div className="flex items-center gap-4">
             <button
-              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
-              onClick={() => setSidebarOpen(true)}
+              type="button"
+              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition shadow-xs cursor-pointer"
+              onClick={() => {
+                const nextState = !sidebarOpen;
+                setSidebarOpen(nextState);
+                localStorage.setItem("sg_sidebar_open", String(nextState));
+              }}
             >
               <Menu size={20} />
             </button>
@@ -1363,7 +1414,7 @@ export default function Index() {
                     <button
                       onClick={() => {
                         setProfileTab("details");
-                        setActiveNav("Profile");
+                        navigateToModule("Profile");
                         setProfileOpen(false);
                       }}
                       className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center justify-between"
@@ -1374,7 +1425,7 @@ export default function Index() {
                     <button
                       onClick={() => {
                         setProfileTab("security");
-                        setActiveNav("Profile");
+                        navigateToModule("Profile");
                         setProfileOpen(false);
                       }}
                       className="w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
