@@ -12,9 +12,9 @@ export const authRouter = Router();
 
 function getDefaultSuperAdmin() {
   return {
-    name: process.env.SUPER_ADMIN_NAME || "Super Administrator",
-    email: process.env.SUPER_ADMIN_EMAIL || "superadmin@nexora.com",
-    password: process.env.SUPER_ADMIN_PASSWORD || "",
+    name: process.env.SUPER_ADMIN_NAME || "SG Super Admin",
+    email: process.env.SUPER_ADMIN_EMAIL || "sgreport@gmail.com",
+    password: process.env.SUPER_ADMIN_PASSWORD || "sgreport@5876",
     role: "Super Admin",
     status: "Active" as const,
   };

@@ -21,7 +21,7 @@ function DashboardContent() {
   });
   const [reportsData, setReportsData] = useState<ReportItem[]>([]);
 
-  useEffect(() => {
+  const fetchDashboardData = () => {
     const params = new URLSearchParams();
     if (fromDate) params.append("fromDate", fromDate);
     if (toDate) params.append("toDate", toDate);
@@ -46,6 +46,17 @@ function DashboardContent() {
       .catch((err) => {
         console.warn("Failed to fetch dashboard summary:", err);
       });
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+
+    const handleReportUploaded = () => fetchDashboardData();
+    window.addEventListener("sg:report-uploaded", handleReportUploaded);
+
+    return () => {
+      window.removeEventListener("sg:report-uploaded", handleReportUploaded);
+    };
   }, [fromDate, toDate]);
 
   const filteredRows = reportsData.filter((row) =>

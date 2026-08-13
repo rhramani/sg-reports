@@ -113,6 +113,9 @@ export interface ReportItem {
   type: string;
   source: string;
   owner: string;
+  ownerRole?: string;
+  roleId?: string;
+  contentHash?: string;
   status: "Pending" | "Approved" | "Review" | "Inactive";
   rowsCount: number;
   data?: Record<string, unknown>[];

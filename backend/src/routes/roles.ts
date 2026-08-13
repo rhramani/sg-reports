@@ -17,32 +17,34 @@ const DEFAULT_MODULES = [
 ];
 
 export function getDefaultModulePermissions(roleName: string): IModulePermission[] {
-  const isSuperAdmin = roleName === "Super Admin";
-  const isAdmin = !isSuperAdmin && roleName.toLowerCase().includes("admin");
-  const isSupervisor = roleName.toLowerCase().includes("supervisor");
-  const isAnalyst = roleName.toLowerCase().includes("analyst");
+  const cleanRole = (roleName || "").trim().toLowerCase();
+  const isSuperAdmin = cleanRole === "super admin";
+  const isAdmin = isSuperAdmin || cleanRole.includes("admin") || cleanRole === "administrator";
+  const isSupervisor = cleanRole.includes("supervisor") || cleanRole.includes("manager");
+  const isAnalyst = cleanRole.includes("analyst") || cleanRole.includes("operator") || cleanRole.includes("user");
 
   return DEFAULT_MODULES.map((mod) => {
-    // The Permissions tab is strictly reserved for Super Admin only
+    // The Permissions and Roles management tabs are reserved for Admins and Super Admins
     if (mod === "Permissions") {
       return {
         module: mod,
         actions: {
-          view: isSuperAdmin,
-          add: isSuperAdmin,
-          update: isSuperAdmin,
-          delete: isSuperAdmin,
-          export: isSuperAdmin,
+          view: isAdmin,
+          add: isAdmin,
+          update: isAdmin,
+          delete: isAdmin,
+          export: isAdmin,
         },
       };
     }
 
-    if (isSuperAdmin || isAdmin) {
+    if (isAdmin) {
       return {
         module: mod,
         actions: { view: true, add: true, update: true, delete: true, export: true },
       };
     }
+
     if (isSupervisor) {
       const isApprovalOrReport = mod === "Approvals" || mod === "Reports" || mod === "Dashboard";
       return {
@@ -56,19 +58,21 @@ export function getDefaultModulePermissions(roleName: string): IModulePermission
         },
       };
     }
+
     if (isAnalyst) {
-      const isReport = mod === "Reports" || mod === "Dashboard";
+      const isReportOrApproval = mod === "Reports" || mod === "Dashboard" || mod === "Approvals";
       return {
         module: mod,
         actions: {
           view: true,
-          add: isReport,
-          update: isReport,
+          add: isReportOrApproval,
+          update: isReportOrApproval,
           delete: false,
-          export: isReport,
+          export: true,
         },
       };
     }
+
     // Default Viewer / standard fallback
     return {
       module: mod,

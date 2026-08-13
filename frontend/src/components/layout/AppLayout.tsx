@@ -106,26 +106,19 @@ export function AppLayout({ children }: AppLayoutProps) {
       : "User");
   const avatarUrl = currentUser?.avatar || "";
 
-  const refreshUserSession = () => {
-    const user = getAuthUser();
-    if (user) {
-      setCurrentUser(user);
-      if (Array.isArray(user.modulePermissions)) {
-        const map: Record<string, PermissionActions> = {};
-        user.modulePermissions.forEach((mp: { module: string; actions: PermissionActions }) => {
-          if (mp.module && mp.actions) map[mp.module] = mp.actions;
-        });
-        setUserPermissions(map);
+  const populatePermissionsMap = (modulePermsArray: any[]) => {
+    if (!Array.isArray(modulePermsArray)) return;
+    const map: Record<string, PermissionActions> = {};
+    modulePermsArray.forEach((mp: { module: string; actions: PermissionActions }) => {
+      if (mp.module && mp.actions) {
+        map[mp.module] = mp.actions;
+        map[mp.module.trim().toLowerCase()] = mp.actions;
       }
-    }
+    });
+    setUserPermissions(map);
   };
 
-  useEffect(() => {
-    refreshUserSession();
-
-    const handleProfileUpdated = () => refreshUserSession();
-    window.addEventListener("profile-updated", handleProfileUpdated);
-
+  const fetchLatestSession = () => {
     authFetch("/api/auth/me")
       .then(async (res) => {
         if (res.ok) return res.json();
@@ -133,22 +126,35 @@ export function AppLayout({ children }: AppLayoutProps) {
       })
       .then((res) => {
         if (res && res.success && res.user) {
+          try {
+            localStorage.setItem("sg_user", JSON.stringify(res.user));
+          } catch {}
           setCurrentUser(res.user);
-          if (Array.isArray(res.user.modulePermissions)) {
-            const map: Record<string, PermissionActions> = {};
-            res.user.modulePermissions.forEach(
-              (mp: { module: string; actions: PermissionActions }) => {
-                if (mp.module && mp.actions) map[mp.module] = mp.actions;
-              }
-            );
-            setUserPermissions(map);
-          }
+          populatePermissionsMap(res.user.modulePermissions);
         }
       })
       .catch(() => {});
+  };
+
+  const refreshUserSession = () => {
+    const user = getAuthUser();
+    if (user) {
+      setCurrentUser(user);
+      populatePermissionsMap(user.modulePermissions);
+    }
+    fetchLatestSession();
+  };
+
+  useEffect(() => {
+    refreshUserSession();
+
+    const handleUpdated = () => refreshUserSession();
+    window.addEventListener("profile-updated", handleUpdated);
+    window.addEventListener("role-permissions-updated", handleUpdated);
 
     return () => {
-      window.removeEventListener("profile-updated", handleProfileUpdated);
+      window.removeEventListener("profile-updated", handleUpdated);
+      window.removeEventListener("role-permissions-updated", handleUpdated);
     };
   }, []);
 
@@ -156,18 +162,37 @@ export function AppLayout({ children }: AppLayoutProps) {
     if (moduleName === "Profile") {
       return { view: true, add: true, update: true, delete: false, export: false };
     }
+    const isSuperOrAdmin =
+      userRole === "Super Admin" ||
+      userRole === "Administrator" ||
+      userRole === "Admin" ||
+      userRole.toLowerCase().includes("admin");
+
     if (moduleName === "Permissions" || moduleName === "Activity Log") {
-      const isSuper = userRole === "Super Admin";
-      return { view: isSuper, add: isSuper, update: isSuper, delete: isSuper, export: isSuper };
+      return {
+        view: isSuperOrAdmin,
+        add: isSuperOrAdmin,
+        update: isSuperOrAdmin,
+        delete: isSuperOrAdmin,
+        export: isSuperOrAdmin,
+      };
     }
-    if (userRole === "Super Admin") {
+    if (isSuperOrAdmin) {
       return { view: true, add: true, update: true, delete: true, export: true };
     }
-    if (userPermissions[moduleName]) {
-      return userPermissions[moduleName];
+
+    const matchKey = Object.keys(userPermissions).find(
+      (k) => k.trim().toLowerCase() === moduleName.trim().toLowerCase(),
+    );
+    if (matchKey && userPermissions[matchKey]) {
+      return userPermissions[matchKey];
     }
-    if (moduleName === "Dashboard") {
-      return { view: true, add: false, update: false, delete: false, export: false };
+
+    const isStandardWorkspaceModule =
+      moduleName === "Dashboard" || moduleName === "Reports" || moduleName === "Approvals";
+
+    if (isStandardWorkspaceModule) {
+      return { view: true, add: true, update: true, delete: false, export: true };
     }
     return { view: false, add: false, update: false, delete: false, export: false };
   };
@@ -205,6 +230,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   useEffect(() => {
     if (
+      Object.keys(userPermissions).length > 0 &&
       allPermittedModules.length > 0 &&
       !allPermittedModules.includes(activeNav) &&
       activeNav !== "Profile" &&
@@ -212,7 +238,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     ) {
       navigateToModule(allPermittedModules[0], true);
     }
-  }, [userPermissions, activeNav]);
+  }, [userPermissions, activeNav, allPermittedModules]);
 
   const contextValue = {
     getPermissionsForModule,

@@ -2,11 +2,13 @@ import { Router } from "express";
 import { getDBStatus } from "../db";
 import { ApprovalQueueModel } from "../models/ApprovalQueue";
 import { ReportModel } from "../models/Report";
+import { AuthRequest, authenticateToken } from "../middleware/auth";
+import { buildRoleScopeFilter } from "./reports";
 
 export const approvalsRouter = Router();
 
-// GET /api/approvals — returns all reports that have approval entries
-approvalsRouter.get("/", async (_req, res) => {
+// GET /api/approvals — returns all reports that have approval entries (role scoped)
+approvalsRouter.get("/", authenticateToken, async (req: AuthRequest, res) => {
   try {
     const dbStatus = getDBStatus();
     if (dbStatus.stateCode !== 1) {
@@ -16,10 +18,16 @@ approvalsRouter.get("/", async (_req, res) => {
       });
     }
 
+    const roleScope = await buildRoleScopeFilter(req);
+    const queryFilter = { "approvals.0": { $exists: true } };
+    const finalQuery = Object.keys(roleScope).length > 0
+      ? { $and: [queryFilter, roleScope] }
+      : queryFilter;
+
     // Fetch reports that have at least one approval entry
     const approvedReports = await ReportModel.find(
-      { "approvals.0": { $exists: true } },
-      { reportId: 1, name: 1, owner: 1, status: 1, approvals: 1, createdAt: 1 }
+      finalQuery,
+      { reportId: 1, name: 1, owner: 1, ownerRole: 1, status: 1, approvals: 1, createdAt: 1 }
     ).sort({ createdAt: -1 });
 
     // Map to the shape the Approvals tab expects:

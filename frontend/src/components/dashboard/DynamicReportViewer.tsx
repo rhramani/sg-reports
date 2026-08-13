@@ -1501,13 +1501,20 @@ function LedgerPane({
               const currentUserName =
                 user?.name || user?.email?.split("@")[0] || "BHAVESH";
 
+              const isRowModified = Boolean(row._isModified);
+              const isNewRowEntry = Boolean(row._isNewEntry);
+
               return (
                 <tr
                   key={`${group}-${index}`}
                   className={`transition-colors duration-150 ${
                     isRowApproved
                       ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
-                      : `${band.base} ${band.hover}`
+                      : isRowModified
+                        ? "bg-amber-50/90 hover:bg-amber-100/90 border-l-4 border-l-amber-500 shadow-2xs"
+                        : isNewRowEntry
+                          ? "bg-emerald-50/80 hover:bg-emerald-100/80 border-l-4 border-l-emerald-500"
+                          : `${band.base} ${band.hover}`
                   } ${
                     isNewEntryStart
                       ? "border-t-2 border-slate-300/80"
@@ -1564,27 +1571,121 @@ function LedgerPane({
                             By - {currentUserName}
                           </span>
                         )}
+                        {isRowModified && (
+                          <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
+                            <RefreshCw size={9} className="text-amber-700 animate-spin-slow" /> Modified
+                          </span>
+                        )}
                       </div>
                     )}
                   </td>
-                  {textColumns.map((column) => (
-                    <td
-                      key={column}
-                      className="whitespace-nowrap px-3.5 py-2.5 align-top text-xs font-medium text-slate-700"
-                    >
-                      {column === transactionKey
+                  {textColumns.map((column) => {
+                    const valNode =
+                      column === transactionKey
                         ? row[column] || group || "—"
-                        : row[column] || "—"}
-                    </td>
-                  ))}
-                  {activeNumericKeys.map((nk) => (
-                    <td
-                      key={nk}
-                      className={`whitespace-nowrap px-3.5 py-2.5 text-right align-top text-xs font-bold ${toneText}`}
-                    >
-                      {row[nk] || "—"}
-                    </td>
-                  ))}
+                        : row[column] || "—";
+                    const fieldDiff = (row._diff as Record<string, { old: unknown; new: unknown }> | undefined)?.[column];
+
+                    if (fieldDiff) {
+                      return (
+                        <td
+                          key={column}
+                          className="whitespace-nowrap px-3 py-2 align-top text-xs font-medium bg-amber-100/40 text-slate-900"
+                        >
+                          <div className="group relative inline-flex items-center gap-1.5 justify-start w-full">
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-bold text-amber-950 border border-amber-300 shadow-2xs">
+                              {valNode}
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse" />
+                            </span>
+                            {/* Popover on hover showing Old vs New value */}
+                            <div className="pointer-events-none absolute bottom-full left-0 mb-2 hidden group-hover:flex flex-col gap-1.5 rounded-xl bg-slate-900 p-2.5 text-[11px] text-white shadow-2xl z-50 whitespace-nowrap border border-slate-700 animate-in fade-in zoom-in-95">
+                              <div className="flex items-center gap-1 font-bold text-amber-400 border-b border-slate-800 pb-1">
+                                <Sparkles size={12} /> Entry Value Changed
+                              </div>
+                              <div className="flex items-center gap-2 text-slate-300">
+                                <span className="text-slate-400 font-medium">Original (Old):</span>
+                                <span className="line-through text-rose-300 font-mono font-bold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800/60">
+                                  {String(fieldDiff.old ?? "—")}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-slate-100">
+                                <span className="text-slate-400 font-medium">Updated (New):</span>
+                                <span className="text-emerald-300 font-mono font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
+                                  {String(fieldDiff.new ?? row[column] ?? "—")}
+                                </span>
+                              </div>
+                              {row._modifiedBy && (
+                                <div className="text-[9.5px] text-slate-400 border-t border-slate-800 pt-1 mt-0.5">
+                                  Modified by {String(row._modifiedBy)}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      );
+                    }
+
+                    return (
+                      <td
+                        key={column}
+                        className="whitespace-nowrap px-3.5 py-2.5 align-top text-xs font-medium text-slate-700"
+                      >
+                        {valNode}
+                      </td>
+                    );
+                  })}
+                  {activeNumericKeys.map((nk) => {
+                    const valNode = row[nk] || "—";
+                    const fieldDiff = (row._diff as Record<string, { old: unknown; new: unknown }> | undefined)?.[nk];
+
+                    if (fieldDiff) {
+                      return (
+                        <td
+                          key={nk}
+                          className="whitespace-nowrap px-3 py-2 text-right align-top text-xs font-bold bg-amber-100/40 text-amber-950"
+                        >
+                          <div className="group relative inline-flex items-center gap-1.5 justify-end w-full">
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-mono font-bold text-amber-950 border border-amber-300 shadow-2xs">
+                              {valNode}
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse" />
+                            </span>
+                            {/* Popover on hover showing Old vs New value */}
+                            <div className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:flex flex-col gap-1.5 rounded-xl bg-slate-900 p-2.5 text-[11px] text-white shadow-2xl z-50 whitespace-nowrap border border-slate-700 animate-in fade-in zoom-in-95 text-left">
+                              <div className="flex items-center gap-1 font-bold text-amber-400 border-b border-slate-800 pb-1">
+                                <Sparkles size={12} /> Entry Value Changed
+                              </div>
+                              <div className="flex items-center gap-2 text-slate-300">
+                                <span className="text-slate-400 font-medium">Original (Old):</span>
+                                <span className="line-through text-rose-300 font-mono font-bold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800/60">
+                                  {String(fieldDiff.old ?? "—")}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-slate-100">
+                                <span className="text-slate-400 font-medium">Updated (New):</span>
+                                <span className="text-emerald-300 font-mono font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
+                                  {String(fieldDiff.new ?? row[nk] ?? "—")}
+                                </span>
+                              </div>
+                              {row._modifiedBy && (
+                                <div className="text-[9.5px] text-slate-400 border-t border-slate-800 pt-1 mt-0.5">
+                                  Modified by {String(row._modifiedBy)}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      );
+                    }
+
+                    return (
+                      <td
+                        key={nk}
+                        className={`whitespace-nowrap px-3.5 py-2.5 text-right align-top text-xs font-bold ${toneText}`}
+                      >
+                        {valNode}
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}
@@ -2203,17 +2304,17 @@ export function DynamicReportViewer({
         if (data.success && Array.isArray(data.data)) {
           setSavedReports(data.data);
           if (data.data.length > 0) {
-            const exists = data.data.some(
+            const matchingReport = data.data.find(
               (r: ReportItem) => (r._id || r.reportId) === selectedReportId,
             );
-            if (!exists || !selectedReportId) {
-              selectReport(data.data[0]);
-            }
+            selectReport(matchingReport || data.data[0]);
           } else {
             setRows([]);
             setFileName("");
             setSelectedReportId("");
             setActiveReportMeta(null);
+            setActiveReportHeaders([]);
+            setActiveHeaderStructure(null);
           }
         }
       }
@@ -2293,7 +2394,7 @@ export function DynamicReportViewer({
     setActiveReportMeta(report);
     setActiveHeaderStructure((report as any).headerStructure || null);
     if (Array.isArray(report.headers) && report.headers.length > 0) {
-      setActiveReportHeaders(report.headers);
+      setActiveReportHeaders(report.headers.filter((h: string) => !h.startsWith("_")));
     } else {
       setActiveReportHeaders([]);
     }
@@ -2301,16 +2402,23 @@ export function DynamicReportViewer({
     setViewMode("auto");
 
     if (report.data && Array.isArray(report.data) && report.data.length > 0) {
-      const sanitized = report.data.map((row, idx) => ({
-        ...Object.fromEntries(
-          Object.entries(row).map(([k, v]) => [k, String(v ?? "")]),
-        ),
-        _originalIndex: idx,
-      }));
+      const sanitized = (report.data as Record<string, unknown>[]).map(
+        (row: Record<string, unknown>, idx: number) => {
+          const copy: Record<string, unknown> = { _originalIndex: idx };
+          Object.entries(row).forEach(([k, v]) => {
+            if (k.startsWith("_")) {
+              copy[k] = v;
+            } else {
+              copy[k] = v === null || v === undefined ? "" : String(v);
+            }
+          });
+          return copy;
+        },
+      );
       const detectedCols = Array.from<string>(
         new Set(
           sanitized.flatMap((r) =>
-            Object.keys(r).filter((k) => k !== "_originalIndex"),
+            Object.keys(r).filter((k) => !k.startsWith("_")),
           ),
         ),
       );
@@ -2358,17 +2466,22 @@ export function DynamicReportViewer({
             Array.isArray(resData.data.data)
           ) {
             const sanitized = resData.data.data.map(
-              (row: Record<string, unknown>, idx: number) => ({
-                ...Object.fromEntries(
-                  Object.entries(row).map(([k, v]) => [k, String(v ?? "")]),
-                ),
-                _originalIndex: idx,
-              }),
+              (row: Record<string, unknown>, idx: number) => {
+                const copy: Record<string, unknown> = { _originalIndex: idx };
+                Object.entries(row).forEach(([k, v]) => {
+                  if (k.startsWith("_")) {
+                    copy[k] = v;
+                  } else {
+                    copy[k] = v === null || v === undefined ? "" : String(v);
+                  }
+                });
+                return copy;
+              },
             );
             const detectedCols = Array.from<string>(
               new Set(
                 sanitized.flatMap((r: Record<string, any>) =>
-                  Object.keys(r).filter((k) => k !== "_originalIndex"),
+                  Object.keys(r).filter((k) => !k.startsWith("_")),
                 ),
               ),
             );
@@ -2385,7 +2498,10 @@ export function DynamicReportViewer({
               Array.isArray(fetchedReport.headers) &&
               fetchedReport.headers.length > 0
             ) {
-              setActiveReportHeaders(fetchedReport.headers);
+              const cleanHeaders = fetchedReport.headers.filter(
+                (h: string) => !h.startsWith("_"),
+              );
+              setActiveReportHeaders(cleanHeaders);
             }
             if (
               fetchedReport.approvals &&
@@ -2483,11 +2599,6 @@ export function DynamicReportViewer({
       });
     }
 
-    setRows(processedRows);
-    setFileName(cleanName);
-    setSelectedReportId("new_upload");
-    setActiveReportHeaders(headers);
-    setViewMode("auto");
     const uploadDate = getTodayDateString();
     setStartDate(uploadDate);
     setEndDate(uploadDate);
@@ -2514,8 +2625,12 @@ export function DynamicReportViewer({
     }
 
     const cleanBackendData = processedRows.slice(0, 500).map((r) => {
-      const copy = { ...r };
-      delete copy._originalIndex;
+      const copy: Record<string, unknown> = {};
+      Object.entries(r).forEach(([k, v]) => {
+        if (!k.startsWith("_")) {
+          copy[k] = v;
+        }
+      });
       if (isMelting && !copy["Purity"]) {
         copy["Purity"] = calculateRowPurity(
           r,
@@ -2527,10 +2642,11 @@ export function DynamicReportViewer({
       return copy;
     });
 
+    const cleanRawHeaders = headers.filter((h) => !h.startsWith("_"));
     const backendHeaders =
-      isMelting && !headers.some((c) => /purity/i.test(c))
-        ? [...headers.filter((c) => !/purity/i.test(c)), "Purity"]
-        : headers;
+      isMelting && !cleanRawHeaders.some((c) => /purity/i.test(c))
+        ? [...cleanRawHeaders.filter((c) => !/purity/i.test(c)), "Purity"]
+        : cleanRawHeaders;
 
     let backendHeaderStructure = headerStructure;
     if (isMelting && headerStructure) {
@@ -2550,54 +2666,128 @@ export function DynamicReportViewer({
     }
     setActiveHeaderStructure(backendHeaderStructure);
 
-    const extractedDate = extractReportDate(cleanBackendData);
-    const reportDate = extractedDate || startDate || getTodayDateString();
-
-    let targetStartDate = startDate;
-    let targetEndDate = endDate;
-
-    if (reportDate) {
-      if (!targetStartDate || reportDate < targetStartDate) {
-        targetStartDate = reportDate;
-        setStartDate(reportDate);
-      }
-      if (!targetEndDate || reportDate > targetEndDate) {
-        targetEndDate = reportDate;
-        setEndDate(reportDate);
-      }
-    }
+    const reportDate = getTodayDateString();
 
     try {
       const currentUser = getAuthUser();
+      const payload = {
+        name: cleanName,
+        type: cleanName,
+        source: "Spreadsheet Upload",
+        owner: currentUser?.name || currentUser?.email || "Unknown",
+        ownerRole: currentUser?.role || "User",
+        data: cleanBackendData,
+        headers: backendHeaders,
+        headerStructure: backendHeaderStructure,
+        createdAt: reportDate,
+      };
+
+      // STEP 1: Pre-check backend to verify if report exists for today & if entries have changes
+      const checkRes = await authFetch("/api/reports/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const checkData = await checkRes.json();
+
+      if (checkData.exists) {
+        if (checkData.isSuperAdminProtected || checkData.isRoleProtected) {
+          const ownerName = checkData.existingReport?.owner || "User";
+          const ownerRoleName = checkData.existingReport?.ownerRole || "User";
+          const reportName = checkData.existingReport?.name || cleanName;
+          const msg =
+            checkData.message ||
+            checkData.error ||
+            `Upload Blocked: Report "${reportName}" was uploaded today by '${ownerName}' (${ownerRoleName}). Users belonging to a different role cannot overwrite or duplicate this report.`;
+
+          const modalTitle = checkData.isSuperAdminProtected
+            ? "Upload Blocked: Protected by Super Admin"
+            : `Upload Blocked: Protected by ${ownerRoleName}`;
+
+          setDuplicateModal({
+            isOpen: true,
+            title: modalTitle,
+            message: msg,
+            isSuperAdminProtected: Boolean(checkData.isSuperAdminProtected),
+            isRoleProtected: true,
+            payload,
+          });
+          toast(msg);
+          return;
+        }
+
+        if (checkData.isExactDuplicate || checkData.contentMatch) {
+          // Exact duplicate entries or content match -> STOP! Do NOT call save POST API!
+          setDuplicateModal({
+            isOpen: true,
+            title: "Upload Blocked: Same-Day Duplicate Report",
+            message: checkData.message || `Report "${cleanName}" has already been uploaded today with identical entries. Duplicate report upload is not allowed.`,
+            payload,
+          });
+          toast(checkData.message || `Upload blocked: Report "${cleanName}" already exists today.`);
+          return;
+        }
+
+        if (checkData.hasEntryChanges) {
+          // Report exists for today, but entries have changes -> Prompt user to update existing report
+          setDuplicateModal({
+            isOpen: true,
+            title: "Existing Report Found with Entry Changes",
+            message: checkData.message || `Report "${cleanName}" already exists for today, but entry changes were detected. Would you like to update today's existing report?`,
+            payload,
+          });
+          toast(`Existing report "${cleanName}" found for today with entry changes.`);
+          return;
+        }
+      }
+
+      // STEP 2: Execute POST create API
       const res = await authFetch("/api/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: cleanName,
-          type: cleanName,
-          source: "Spreadsheet Upload",
-          owner: currentUser?.name || currentUser?.email || "Unknown",
-          data: cleanBackendData,
-          headers: backendHeaders,
-          headerStructure: backendHeaderStructure,
-          createdAt: reportDate,
-        }),
+        body: JSON.stringify(payload),
       });
+
       const data = await res.json();
+
       if (data.success && data.data) {
+        if (reportDate) {
+          setStartDate(reportDate);
+          setEndDate(reportDate);
+        }
+
+        setRows(processedRows);
+        setFileName(cleanName);
+        setSelectedReportId(data.data.reportId || data.data._id || "");
+        setActiveReportHeaders(backendHeaders);
+        setActiveHeaderStructure(backendHeaderStructure);
+        setViewMode("auto");
+        setSelected(preSelected);
         setReportId(data.data.reportId || data.data._id || "");
         setActiveReportMeta(data.data);
-        if (parsed.length <= 500) {
+
+        setSavedReports((prev) => [
+          data.data,
+          ...prev.filter(
+            (r) => (r._id || r.reportId) !== (data.data._id || data.data.reportId)
+          ),
+        ]);
+
+        if (data.isUpdated) {
+          backendMsg = data.message || `Corrected entries for report "${cleanName}" updated successfully in today's report!`;
+        } else if (parsed.length <= 500) {
           backendMsg = `Report "${cleanName}" uploaded and saved to backend!`;
         }
-        await refreshAllData(targetStartDate, targetEndDate);
+
+        await refreshAllData();
+        window.dispatchEvent(new Event("sg:report-uploaded"));
       } else {
-        backendMsg = `Parsed locally, but saving to backend failed${
+        backendMsg = `Saving to backend failed${
           data?.error ? `: ${data.error}` : ""
         }`;
       }
     } catch {
-      backendMsg = `Parsed locally, but saving to backend failed — check your connection and re-upload`;
+      backendMsg = `Saving to backend failed — check your connection and re-upload`;
     }
 
     toast(backendMsg);
@@ -2615,7 +2805,7 @@ export function DynamicReportViewer({
     const rowDerivedCols = Array.from(
       new Set(
         rows.flatMap((row) =>
-          Object.keys(row).filter((k) => k !== "_originalIndex"),
+          Object.keys(row).filter((k) => !k.startsWith("_")),
         ),
       ),
     ).filter((col) =>
@@ -2628,7 +2818,7 @@ export function DynamicReportViewer({
     if (activeReportHeaders.length > 0) {
       const rowColSet = new Set(rowDerivedCols);
       const fromSaved = activeReportHeaders.filter(
-        (h) => h !== "_originalIndex" && rowColSet.has(h),
+        (h) => !h.startsWith("_") && rowColSet.has(h),
       );
       const savedSet = new Set(fromSaved);
       const extras = rowDerivedCols.filter((c) => !savedSet.has(c));
@@ -2988,6 +3178,80 @@ export function DynamicReportViewer({
 
   const [deleteReportModalOpen, setDeleteReportModalOpen] = useState(false);
   const [deletingReport, setDeletingReport] = useState(false);
+
+  const [duplicateModal, setDuplicateModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    isContentMatch?: boolean;
+    isSuperAdminProtected?: boolean;
+    isRoleProtected?: boolean;
+    existingName?: string;
+    payload?: {
+      name: string;
+      type: string;
+      source: string;
+      owner: string;
+      ownerRole?: string;
+      data: Record<string, unknown>[];
+      headers: string[];
+      headerStructure?: HeaderStructure;
+      createdAt: string;
+    };
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+  });
+  const [submittingOverwrite, setSubmittingOverwrite] = useState(false);
+
+  const handleConfirmOverwrite = async (forceDup: boolean = false) => {
+    if (!duplicateModal.payload) return;
+    setSubmittingOverwrite(true);
+    try {
+      const res = await authFetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...duplicateModal.payload,
+          overwrite: !forceDup,
+          forceDuplicate: forceDup,
+        }),
+      });
+      const data = await res.json();
+      if (res.status === 403) {
+        toast(data.error || "Permission denied: Cannot overwrite Super Admin report.");
+      } else if (data.success && data.data) {
+        if (duplicateModal.payload) {
+          setRows(duplicateModal.payload.data);
+          setActiveReportHeaders(duplicateModal.payload.headers);
+          if (duplicateModal.payload.headerStructure) {
+            setActiveHeaderStructure(duplicateModal.payload.headerStructure);
+          }
+          setFileName(duplicateModal.payload.name);
+          setSelectedReportId(data.data.reportId || data.data._id || "");
+          setViewMode("auto");
+        }
+        setReportId(data.data.reportId || data.data._id || "");
+        setActiveReportMeta(data.data);
+        const msg =
+          data.message ||
+          (forceDup
+            ? "Report saved as new copy!"
+            : "Existing report overwritten successfully!");
+        toast(msg);
+        const reportDate = duplicateModal.payload?.createdAt;
+        await refreshAllData(reportDate, reportDate);
+      } else {
+        toast(`Action failed: ${data?.error || "Unknown error"}`);
+      }
+    } catch {
+      toast("Action failed — check your connection and retry.");
+    } finally {
+      setSubmittingOverwrite(false);
+      setDuplicateModal({ isOpen: false, title: "", message: "" });
+    }
+  };
 
   const handleDeleteReport = () => {
     const targetId =
@@ -3366,24 +3630,58 @@ export function DynamicReportViewer({
           <>
             {/* 1. Side-by-Side Financial Ledger View */}
             {effectiveViewMode === "ledger" && (
-              <LedgerTableView
-                rows={visibleGridRows}
-                columns={columns}
-                transactionKey={transactionKey!}
-                typeKey={typeKey!}
-                amountKey={amountKey!}
-                selected={selected}
-                toggleApproval={toggleApproval}
-                getRelatedGroupIndices={getRelatedGroupIndices}
-                rowGroupMeta={rowGroupMeta}
-                entryColorPalette={entryColorPalette}
-                canDelete={false}
-              />
+              <div>
+                {visibleGridRows.some((r) => r._isModified) && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/95 border border-amber-300/80 p-3 px-4 text-xs text-amber-900 rounded-xl mb-3 shadow-2xs animate-in fade-in">
+                    <div className="flex items-center gap-2 font-medium">
+                      <div className="grid h-6 w-6 place-items-center rounded-lg bg-amber-200/90 text-amber-800 shrink-0">
+                        <Sparkles size={14} />
+                      </div>
+                      <span>
+                        <strong>Modified Entry Data Detected:</strong> Highlighted ledger rows contain updated values from a recent upload. Hover over highlighted cells to view original (old) vs updated (new) values.
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-bold text-[11px] bg-amber-200/90 text-amber-900 px-2.5 py-1 rounded-lg border border-amber-300 shadow-2xs shrink-0">
+                      <RefreshCw size={12} className="text-amber-700 animate-spin-slow" />
+                      {visibleGridRows.filter((r) => r._isModified).length} Modified Entries
+                    </div>
+                  </div>
+                )}
+                <LedgerTableView
+                  rows={visibleGridRows}
+                  columns={columns}
+                  transactionKey={transactionKey!}
+                  typeKey={typeKey!}
+                  amountKey={amountKey!}
+                  selected={selected}
+                  toggleApproval={toggleApproval}
+                  getRelatedGroupIndices={getRelatedGroupIndices}
+                  rowGroupMeta={rowGroupMeta}
+                  entryColorPalette={entryColorPalette}
+                  canDelete={false}
+                />
+              </div>
             )}
 
             {/* 2. Standard Tabular Grid View */}
             {effectiveViewMode === "grid" && (
               <div className="max-h-[750px] xl:max-h-[calc(100vh-230px)] overflow-auto">
+                {visibleGridRows.some((r) => r._isModified) && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/95 border border-amber-300/80 p-3 px-4 text-xs text-amber-900 rounded-xl mb-3 shadow-2xs animate-in fade-in">
+                    <div className="flex items-center gap-2 font-medium">
+                      <div className="grid h-6 w-6 place-items-center rounded-lg bg-amber-200/90 text-amber-800 shrink-0">
+                        <Sparkles size={14} />
+                      </div>
+                      <span>
+                        <strong>Modified Entry Data Detected:</strong> Highlighted rows contain updated values from a recent upload. Hover over highlighted cells to view original (old) vs updated (new) values.
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-bold text-[11px] bg-amber-200/90 text-amber-900 px-2.5 py-1 rounded-lg border border-amber-300 shadow-2xs shrink-0">
+                      <RefreshCw size={12} className="text-amber-700 animate-spin-slow" />
+                      {visibleGridRows.filter((r) => r._isModified).length} Modified Entries
+                    </div>
+                  </div>
+                )}
                 <table className="w-full min-w-[900px] border-separate border-spacing-0 text-left">
                   {activeHeaderStructure &&
                   activeHeaderStructure.isMultiLevel &&
@@ -3694,13 +3992,20 @@ export function DynamicReportViewer({
                       const currentUserName =
                         user?.name || user?.email?.split("@")[0] || "BHAVESH";
 
+                      const isRowModified = Boolean(row._isModified);
+                      const isNewRowEntry = Boolean(row._isNewEntry);
+
                       return (
                         <tr
                           key={origIndex}
                           className={`transition-colors duration-150 ${
                             isRowApproved
                               ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
-                              : `${band.base} ${band.hover}`
+                              : isRowModified
+                                ? "bg-amber-50/90 hover:bg-amber-100/90 border-l-4 border-l-amber-500 shadow-2xs"
+                                : isNewRowEntry
+                                  ? "bg-emerald-50/80 hover:bg-emerald-100/80 border-l-4 border-l-emerald-500"
+                                  : `${band.base} ${band.hover}`
                           } ${
                             isNewEntryStart && index > 0
                               ? "border-t-2 border-slate-300/80 shadow-[0_-1px_0_rgba(0,0,0,0.04)]"
@@ -3749,6 +4054,11 @@ export function DynamicReportViewer({
                                     By - {currentUserName}
                                   </span>
                                 )}
+                                {isRowModified && (
+                                  <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
+                                    <RefreshCw size={9} className="text-amber-700 animate-spin-slow" /> Modified
+                                  </span>
+                                )}
                               </div>
                             )}
                           </td>
@@ -3787,6 +4097,75 @@ export function DynamicReportViewer({
                                 column,
                               );
 
+                            const fieldDiff = (row._diff as Record<string, { old: unknown; new: unknown }> | undefined)?.[column];
+
+                            const baseValNode = isPurityCol ? (
+                              isNewEntryStart &&
+                              purityValue !== "—" &&
+                              purityValue !== "" ? (
+                                <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200 shadow-xs whitespace-nowrap">
+                                  {purityValue}
+                                </span>
+                              ) : (
+                                "—"
+                              )
+                            ) : column === typeKey ? (
+                              <span
+                                className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${
+                                  /debit/i.test(row[column])
+                                    ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                    : /credit/i.test(row[column])
+                                      ? "bg-teal-50 text-teal-700 border border-teal-200"
+                                      : "bg-slate-100 text-slate-700"
+                                }`}
+                              >
+                                {row[column]}
+                              </span>
+                            ) : (
+                              row[column] || "—"
+                            );
+
+                            if (fieldDiff) {
+                              return (
+                                <td
+                                  key={column}
+                                  className={`border-b border-l border-slate-100 px-3 py-2 text-xs font-medium whitespace-nowrap align-middle bg-amber-100/40 ${
+                                    isNum ? "text-right font-mono" : "text-left"
+                                  }`}
+                                >
+                                  <div className="group relative inline-flex items-center gap-1.5 justify-end w-full">
+                                    <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 px-2 py-0.5 font-bold text-amber-950 border border-amber-300 shadow-2xs">
+                                      {baseValNode}
+                                      <span className="h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse" />
+                                    </span>
+                                    {/* Popover on hover showing Old vs New value */}
+                                    <div className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:flex flex-col gap-1.5 rounded-xl bg-slate-900 p-2.5 text-[11px] text-white shadow-2xl z-50 whitespace-nowrap border border-slate-700 animate-in fade-in zoom-in-95">
+                                      <div className="flex items-center gap-1 font-bold text-amber-400 border-b border-slate-800 pb-1">
+                                        <Sparkles size={12} /> Entry Value Changed
+                                      </div>
+                                      <div className="flex items-center gap-2 text-slate-300">
+                                        <span className="text-slate-400 font-medium">Original (Old):</span>
+                                        <span className="line-through text-rose-300 font-mono font-bold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800/60">
+                                          {String(fieldDiff.old ?? "—")}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-slate-100">
+                                        <span className="text-slate-400 font-medium">Updated (New):</span>
+                                        <span className="text-emerald-300 font-mono font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
+                                          {String(fieldDiff.new ?? row[column] ?? "—")}
+                                        </span>
+                                      </div>
+                                      {row._modifiedBy && (
+                                        <div className="text-[9.5px] text-slate-400 border-t border-slate-800 pt-1 mt-0.5">
+                                          Modified by {String(row._modifiedBy)}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                              );
+                            }
+
                             return (
                               <td
                                 key={column}
@@ -3798,31 +4177,7 @@ export function DynamicReportViewer({
                                     : "text-slate-700"
                                 }`}
                               >
-                                {isPurityCol ? (
-                                  isNewEntryStart &&
-                                  purityValue !== "—" &&
-                                  purityValue !== "" ? (
-                                    <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200 shadow-xs whitespace-nowrap">
-                                      {purityValue}
-                                    </span>
-                                  ) : (
-                                    "—"
-                                  )
-                                ) : column === typeKey ? (
-                                  <span
-                                    className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${
-                                      /debit/i.test(row[column])
-                                        ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                        : /credit/i.test(row[column])
-                                          ? "bg-teal-50 text-teal-700 border border-teal-200"
-                                          : "bg-slate-100 text-slate-700"
-                                    }`}
-                                  >
-                                    {row[column]}
-                                  </span>
-                                ) : (
-                                  row[column] || "—"
-                                )}
+                                {baseValNode}
                               </td>
                             );
                           })}
@@ -4011,6 +4366,69 @@ export function DynamicReportViewer({
                   "Yes, Delete Report"
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Report Duplicate / Overwrite Confirmation Modal ── */}
+      {duplicateModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl animate-in zoom-in-95 border border-rose-100">
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-100">
+                <Sparkles size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  {duplicateModal.title}
+                </h3>
+                <p className="text-xs font-semibold text-rose-600">
+                  {duplicateModal.payload?.name}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">
+              {duplicateModal.message}
+            </p>
+            <p className="text-xs text-slate-600 mb-5 bg-rose-50/80 border border-rose-200/60 p-3 rounded-xl leading-relaxed">
+              {duplicateModal.isRoleProtected ? (
+                <>
+                  <strong>Role Protection:</strong> Reports uploaded by users of a specific role are protected. Users belonging to a different role cannot overwrite or duplicate reports uploaded by other roles. Please contact your workspace administrator.
+                </>
+              ) : (
+                <>
+                  <strong>Notice:</strong> Creating duplicate report records on the same day is strictly blocked to maintain data integrity. If you are uploading a corrected version of today's file, you can update today's existing report entries below.
+                </>
+              )}
+            </p>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={submittingOverwrite}
+                onClick={() =>
+                  setDuplicateModal({ isOpen: false, title: "", message: "" })
+                }
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+              >
+                {duplicateModal.isRoleProtected ? "Close / Cancel Upload" : "Cancel Upload"}
+              </button>
+              {!duplicateModal.isRoleProtected && (
+                <button
+                  type="button"
+                  disabled={submittingOverwrite}
+                  onClick={() => handleConfirmOverwrite(false)}
+                  className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 shadow-md shadow-amber-600/20 transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  {submittingOverwrite ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" /> Updating...
+                    </>
+                  ) : (
+                    "Update Today's Existing Report"
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

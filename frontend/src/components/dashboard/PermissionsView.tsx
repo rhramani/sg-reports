@@ -225,6 +225,7 @@ export function PermissionsView() {
       const json = await res.json();
       if (json.success) {
         showNotification(`Permissions updated successfully for '${currentRole.role}'.`, "success");
+        window.dispatchEvent(new Event("role-permissions-updated"));
         setRoles((prev) =>
           prev.map((r) =>
             r._id === currentRole._id ? { ...r, modulePermissions: payload } : r

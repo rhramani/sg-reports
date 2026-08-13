@@ -13,6 +13,9 @@ export interface IReport extends Document {
   type: string;
   source: string;
   owner: string;
+  ownerRole?: string;
+  roleId?: string;
+  contentHash?: string;
   status: "Pending" | "Approved" | "Review" | "Inactive";
   rowsCount: number;
   data?: Record<string, unknown>[];
@@ -40,6 +43,9 @@ const ReportSchema = new Schema<IReport>(
     type: { type: String, required: true },
     source: { type: String, required: true },
     owner: { type: String, required: true },
+    ownerRole: { type: String, index: true },
+    roleId: { type: String, index: true },
+    contentHash: { type: String, index: true },
     status: {
       type: String,
       enum: ["Pending", "Approved", "Review", "Inactive"],
