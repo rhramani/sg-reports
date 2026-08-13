@@ -8,9 +8,16 @@ import { Toaster } from "sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { isTokenValid, clearAuthSession } from "@/lib/apiClient";
 
-const Index = lazy(() => import("./pages/Index"));
 const Login = lazy(() => import("./pages/Login"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Approvals = lazy(() => import("./pages/Approvals"));
+const Users = lazy(() => import("./pages/Users"));
+const Roles = lazy(() => import("./pages/Roles"));
+const Permissions = lazy(() => import("./pages/Permissions"));
+const AuditLogs = lazy(() => import("./pages/AuditLogs"));
+const Profile = lazy(() => import("./pages/Profile"));
 
 const queryClient = new QueryClient();
 
@@ -58,15 +65,71 @@ const App = () => (
             path="/"
             element={
               <ProtectedRoute>
-                <Index />
+                <Dashboard />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/:module"
+            path="/dashboard"
             element={
               <ProtectedRoute>
-                <Index />
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports"
+            element={
+              <ProtectedRoute>
+                <Reports />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/approvals"
+            element={
+              <ProtectedRoute>
+                <Approvals />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute>
+                <Users />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/roles"
+            element={
+              <ProtectedRoute>
+                <Roles />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/permissions"
+            element={
+              <ProtectedRoute>
+                <Permissions />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/activity-log"
+            element={
+              <ProtectedRoute>
+                <AuditLogs />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <Profile />
               </ProtectedRoute>
             }
           />

@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { getDBStatus } from "../db";
 import { ApprovalQueueModel } from "../models/ApprovalQueue";
+import { ReportModel } from "../models/Report";
 
 export const approvalsRouter = Router();
 
-// GET /api/approvals
+// GET /api/approvals — returns all reports that have approval entries
 approvalsRouter.get("/", async (_req, res) => {
   try {
     const dbStatus = getDBStatus();
@@ -14,7 +15,31 @@ approvalsRouter.get("/", async (_req, res) => {
         error: "Database is currently unavailable. Please try again shortly.",
       });
     }
-    const items = await ApprovalQueueModel.find().sort({ createdAt: -1 });
+
+    // Fetch reports that have at least one approval entry
+    const approvedReports = await ReportModel.find(
+      { "approvals.0": { $exists: true } },
+      { reportId: 1, name: 1, owner: 1, status: 1, approvals: 1, createdAt: 1 }
+    ).sort({ createdAt: -1 });
+
+    // Map to the shape the Approvals tab expects:
+    // { _id, report, submittedBy, submitted, priority, status }
+    const items = approvedReports.map((r) => {
+      const latestApproval = r.approvals?.[r.approvals.length - 1];
+      const approvedCount = r.approvals?.length ?? 0;
+      return {
+        _id: r.reportId || r._id,
+        report: r.name,
+        submittedBy: latestApproval?.approvedBy ?? r.owner ?? "Unknown",
+        submitted: latestApproval?.approvedAt
+          ? new Date(latestApproval.approvedAt).toLocaleDateString("en-IN")
+          : new Date(r.createdAt).toLocaleDateString("en-IN"),
+        priority: approvedCount > 50 ? "High" : approvedCount > 20 ? "Medium" : "Low",
+        status: r.status ?? "Approved",
+        approvedRows: approvedCount,
+      };
+    });
+
     res.json({
       success: true,
       data: items,
@@ -26,6 +51,7 @@ approvalsRouter.get("/", async (_req, res) => {
 });
 
 // POST /api/approvals — create
+
 approvalsRouter.post("/", async (req, res) => {
   try {
     const { report, submittedBy, priority } = req.body;
@@ -97,7 +123,7 @@ approvalsRouter.put("/:id", async (req, res) => {
   }
 });
 
-// PATCH /api/approvals/:id — toggle status
+// PATCH /api/approvals/:id — toggle status (updates the underlying Report's status)
 approvalsRouter.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -116,20 +142,26 @@ approvalsRouter.patch("/:id", async (req, res) => {
       return res.status(400).json({ success: false, error: `Status must be one of: ${allowed.join(", ")}` });
     }
 
-    const updated = await ApprovalQueueModel.findByIdAndUpdate(id, { status }, { new: true });
+    // id here is reportId (e.g. REP-MSQ20XH3)
+    const updated = await ReportModel.findOneAndUpdate(
+      { reportId: id },
+      { status },
+      { new: true }
+    );
     if (!updated) {
-      return res.status(404).json({ success: false, error: "Approval queue item not found." });
+      return res.status(404).json({ success: false, error: "Report not found." });
     }
 
     res.json({
       success: true,
       data: updated,
-      message: `Approval status for item updated to '${status}'.`,
+      message: `Approval status updated to '${status}'.`,
     });
   } catch (error) {
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
+
 
 // DELETE /api/approvals/:id — delete
 approvalsRouter.delete("/:id", async (req, res) => {

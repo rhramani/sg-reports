@@ -52,8 +52,8 @@ usersRouter.post(
       if (!password || !password.trim()) {
         return res.status(400).json({ success: false, error: "Password is required.", field: "password" });
       }
-      if (password.trim().length < 6) {
-        return res.status(400).json({ success: false, error: "Password must be at least 6 characters.", field: "password" });
+      if (password.trim().length < 8) {
+        return res.status(400).json({ success: false, error: "Password must be at least 8 characters.", field: "password" });
       }
 
       const cleanEmail = email.trim().toLowerCase();

@@ -10,7 +10,6 @@ import {
   LayoutDashboard,
   FileBarChart,
   ClipboardCheck,
-  FileSpreadsheet,
   CheckCircle2,
   AlertCircle,
   Eye,
@@ -20,22 +19,16 @@ import {
   Download,
   ChevronRight,
 } from "lucide-react";
+import { AppLayout } from "@/components/layout/AppLayout";
 import { authFetch } from "@/lib/apiClient";
-
-export interface PermissionActions {
-  view: boolean;
-  add: boolean;
-  update: boolean;
-  delete: boolean;
-  export: boolean;
-}
+import type { PermissionActions } from "@shared/api";
 
 interface ModulePermission {
   module: string;
   actions: PermissionActions;
 }
 
-export interface RoleData {
+interface RoleData {
   _id: string;
   role: string;
   members: number;
@@ -51,7 +44,6 @@ const DEFAULT_MODULE_DEFINITIONS = [
   { name: "Users", icon: Users, category: "Administration", description: "Workspace members, roles, and invitations" },
   { name: "Roles", icon: Shield, category: "Administration", description: "Workspace role hierarchy and member assignments" },
   { name: "Permissions", icon: ShieldCheck, category: "Administration", description: "Granular action permissions per role & module" },
-  // { name: "Report types", icon: FileSpreadsheet, category: "Administration", description: "Catalog of report structures and data fields" },
 ];
 
 const ACTION_COLUMNS: { key: keyof PermissionActions; label: string; icon: typeof Eye }[] = [
@@ -62,7 +54,7 @@ const ACTION_COLUMNS: { key: keyof PermissionActions; label: string; icon: typeo
   { key: "export", label: "Export", icon: Download },
 ];
 
-export function PermissionsView() {
+function PermissionsContent() {
   const [roles, setRoles] = useState<RoleData[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [permissionsState, setPermissionsState] = useState<Record<string, PermissionActions>>({});
@@ -82,13 +74,13 @@ export function PermissionsView() {
           const initialRole = selectedRoleId
             ? json.data.find((r: RoleData) => r._id === selectedRoleId) ?? json.data[0]
             : json.data[0];
-          
+
           setSelectedRoleId(initialRole._id);
           loadRolePermissions(initialRole);
         }
       }
     } catch (err) {
-      console.error("Failed to load roles for permissions view", err);
+      console.error("Failed to load roles for permissions page", err);
     } finally {
       setLoading(false);
     }
@@ -100,7 +92,7 @@ export function PermissionsView() {
 
   const loadRolePermissions = (role: RoleData) => {
     const permMap: Record<string, PermissionActions> = {};
-    
+
     DEFAULT_MODULE_DEFINITIONS.forEach((mod) => {
       permMap[mod.name] = {
         view: role.role === "Super Admin",
@@ -248,7 +240,6 @@ export function PermissionsView() {
 
   return (
     <div className="w-full max-w-none px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* Toast Notice */}
       {notice && (
         <div
           className={`fixed top-20 right-8 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border backdrop-blur-md transition-all ${
@@ -262,7 +253,6 @@ export function PermissionsView() {
         </div>
       )}
 
-      {/* Clean Page Control Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
         <div>
           <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
@@ -278,14 +268,14 @@ export function PermissionsView() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleGrantAll}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition shadow-sm"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm"
           >
             <CheckSquare size={14} className="text-emerald-600" />
             Grant All
           </button>
           <button
             onClick={handleRevokeAll}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition shadow-sm"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm"
           >
             <Square size={14} className="text-rose-500" />
             Revoke All
@@ -301,9 +291,7 @@ export function PermissionsView() {
         </div>
       </div>
 
-      {/* Main Layout: Role Selector + Permissions Table */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Panel: Role Selector */}
         <div className="lg:col-span-3 space-y-4">
           <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between px-2 pb-3 border-b border-slate-100">
@@ -330,7 +318,7 @@ export function PermissionsView() {
                       className={`group flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-left transition-all ${
                         isSelected
                           ? "bg-[#18476A] text-white shadow-md shadow-[#18476A]/20"
-                          : "bg-slate-50/70 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                          : "bg-slate-50/70 text-slate-700 hover:bg-slate-100"
                       }`}
                     >
                       <div>
@@ -342,9 +330,6 @@ export function PermissionsView() {
                           {role.members ?? 1} member(s) • {role.status}
                         </p>
                       </div>
-                      {isSelected && (
-                        <div className="h-2 w-2 rounded-full bg-blue-300 animate-pulse" />
-                      )}
                     </button>
                   );
                 })}
@@ -353,9 +338,7 @@ export function PermissionsView() {
           </div>
         </div>
 
-        {/* Right Panel: Module Permission Checkbox Matrix */}
         <div className="lg:col-span-9 space-y-4">
-          {/* Matrix Toolbar & Search */}
           <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="relative w-full sm:w-72">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -375,7 +358,6 @@ export function PermissionsView() {
                   key={col.key}
                   onClick={() => toggleColumnAction(col.key)}
                   className="px-2.5 py-1 text-[10px] font-bold rounded-md bg-slate-100 text-slate-700 hover:bg-slate-200 transition"
-                  title={`Toggle '${col.label}' for all modules`}
                 >
                   {col.label}
                 </button>
@@ -383,7 +365,6 @@ export function PermissionsView() {
             </div>
           </div>
 
-          {/* Matrix Card Table */}
           <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -408,7 +389,7 @@ export function PermissionsView() {
                   {filteredModules.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-10 text-center text-slate-400 italic">
-                        No sidebar modules match your search filter.
+                        No sidebar modules match search.
                       </td>
                     </tr>
                   ) : (
@@ -425,11 +406,7 @@ export function PermissionsView() {
                       const someChecked = Object.values(modPerms).some(Boolean);
 
                       return (
-                        <tr
-                          key={mod.name}
-                          className="hover:bg-slate-50/60 transition"
-                        >
-                          {/* Module info */}
+                        <tr key={mod.name} className="hover:bg-slate-50/60 transition">
                           <td className="py-4 px-5">
                             <div className="flex items-center gap-3">
                               <div className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-[#18476A]">
@@ -442,14 +419,11 @@ export function PermissionsView() {
                                     {mod.category}
                                   </span>
                                 </div>
-                                <p className="text-[11px] text-slate-400 mt-0.5">
-                                  {mod.description}
-                                </p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">{mod.description}</p>
                               </div>
                             </div>
                           </td>
 
-                          {/* Action Checkboxes */}
                           {ACTION_COLUMNS.map((col) => {
                             const isChecked = Boolean(modPerms[col.key]);
                             return (
@@ -475,7 +449,6 @@ export function PermissionsView() {
                             );
                           })}
 
-                          {/* Row Toggle All */}
                           <td className="py-4 px-4 text-center">
                             <button
                               onClick={() => toggleAllModuleActions(mod.name)}
@@ -497,24 +470,17 @@ export function PermissionsView() {
                 </tbody>
               </table>
             </div>
-
-            {/* Footer Summary */}
-            <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-3 flex items-center justify-between text-xs text-slate-500">
-              <span>
-                Showing <strong>{filteredModules.length}</strong> workspace modules
-              </span>
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1">
-                  <div className="h-2.5 w-2.5 rounded-full bg-[#18476A]" /> Enabled
-                </span>
-                <span className="flex items-center gap-1">
-                  <div className="h-2.5 w-2.5 rounded-full bg-slate-300" /> Disabled
-                </span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function PermissionsPage() {
+  return (
+    <AppLayout>
+      <PermissionsContent />
+    </AppLayout>
   );
 }

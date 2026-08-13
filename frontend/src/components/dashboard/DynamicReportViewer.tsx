@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { authFetch, getAuthUser } from "@/lib/apiClient";
+
 import type {
   HeaderLevel,
   HeaderStructure,
@@ -210,8 +211,12 @@ const isSubtotalRow = (row: Record<string, any>, columns: string[]) => {
   });
   if (hasSummaryKeyword) return true;
 
-  const debitCol = columns.find((c) => /^debit$|debit.*amt|dr\.?$/i.test(c.trim()));
-  const creditCol = columns.find((c) => /^credit$|credit.*amt|cr\.?$/i.test(c.trim()));
+  const debitCol = columns.find((c) =>
+    /^debit$|debit.*amt|dr\.?$/i.test(c.trim()),
+  );
+  const creditCol = columns.find((c) =>
+    /^credit$|credit.*amt|cr\.?$/i.test(c.trim()),
+  );
 
   if (debitCol && creditCol) {
     const dAmt = parseNumeric(row[debitCol]) ?? 0;
@@ -223,7 +228,6 @@ const isSubtotalRow = (row: Record<string, any>, columns: string[]) => {
 
   return false;
 };
-
 
 function detectGroupKeyColumn(
   rows: Record<string, any>[],
@@ -343,7 +347,11 @@ function computeRowGroups(
       }
 
       if (v !== "") {
-        if (v !== lastSeenVal || (t !== "" && t !== lastSeenType) || groupId === -1) {
+        if (
+          v !== lastSeenVal ||
+          (t !== "" && t !== lastSeenType) ||
+          groupId === -1
+        ) {
           groupId++;
           lastSeenVal = v;
           if (t !== "") lastSeenType = t;
@@ -465,10 +473,10 @@ export function fillSubEntriesFromMain(
   const isItemOrDetailCol = (col: string) =>
     /remark|narra?tion|item|product|description|detail|note|comment|particular/i.test(
       col.trim(),
-    ) && !/book|head|party|account|customer|vendor|company|owner/i.test(col.trim());
+    ) &&
+    !/book|head|party|account|customer|vendor|company|owner/i.test(col.trim());
 
-  const isGlobalHeaderCol = (col: string) =>
-    !isItemOrDetailCol(col);
+  const isGlobalHeaderCol = (col: string) => !isItemOrDetailCol(col);
 
   const isVoucherIdCol = (col: string) =>
     /voucher|transaction|vou\.?no|transno|ref\.?no|doc\.?no|entry\.?no|sr\.?no|sl\.?no|bill\.?no|inv\.?no/i.test(
@@ -547,8 +555,7 @@ export function fillSubEntriesFromMain(
     };
 
     for (const [col, val] of Object.entries(mergedContext)) {
-      if (col === "_originalIndex" || isNumericCol(col))
-        continue;
+      if (col === "_originalIndex" || isNumericCol(col)) continue;
       const currentVal = String(filledRow[col] ?? "").trim();
       const fillVal = String(val ?? "").trim();
       if (
@@ -752,13 +759,14 @@ export function calculateRowPurity(
     return columns.find((column) => fallbackRegex.test(column.trim()));
   };
 
-  const pureWtCols = columns.filter((c) => /pure\s*(wt|weight)/i.test(c.trim()));
+  const pureWtCols = columns.filter((c) =>
+    /pure\s*(wt|weight)/i.test(c.trim()),
+  );
   let outPureWeightColumn =
     findColumn(
       ["Pure Wt (2)", "Pure Weight (2)"],
       /^pure\s*(wt|weight)\s*\(2\)$/i,
-    ) ||
-    columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
+    ) || columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
 
   if (!outPureWeightColumn && pureWtCols.length > 1) {
     outPureWeightColumn = pureWtCols[pureWtCols.length - 1];
@@ -766,7 +774,9 @@ export function calculateRowPurity(
     outPureWeightColumn = pureWtCols[0];
   }
 
-  const weightCols = columns.filter((c) => /^weight$|in.*wt/i.test(c.trim()) && !/pure/i.test(c));
+  const weightCols = columns.filter(
+    (c) => /^weight$|in.*wt/i.test(c.trim()) && !/pure/i.test(c),
+  );
   let inWeightColumn =
     findColumn(["Weight"], /^weight$/i) ||
     columns.find((c) => /in.*wt/i.test(c.trim())) ||
@@ -891,13 +901,14 @@ export function calculateOverallPurity(
     return columns.find((column) => fallbackRegex.test(column.trim()));
   };
 
-  const pureWtCols = columns.filter((c) => /pure\s*(wt|weight)/i.test(c.trim()));
+  const pureWtCols = columns.filter((c) =>
+    /pure\s*(wt|weight)/i.test(c.trim()),
+  );
   let outPureWeightColumn =
     findColumn(
       ["Pure Wt (2)", "Pure Weight (2)"],
       /^pure\s*(wt|weight)\s*\(2\)$/i,
-    ) ||
-    columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
+    ) || columns.find((c) => /out.*pure|pure.*\(2\)|pure.*out/i.test(c.trim()));
 
   if (!outPureWeightColumn && pureWtCols.length > 1) {
     outPureWeightColumn = pureWtCols[pureWtCols.length - 1];
@@ -905,7 +916,9 @@ export function calculateOverallPurity(
     outPureWeightColumn = pureWtCols[0];
   }
 
-  const weightCols = columns.filter((c) => /^weight$|in.*wt/i.test(c.trim()) && !/pure/i.test(c));
+  const weightCols = columns.filter(
+    (c) => /^weight$|in.*wt/i.test(c.trim()) && !/pure/i.test(c),
+  );
   let inWeightColumn =
     findColumn(["Weight"], /^weight$/i) ||
     columns.find((c) => /in.*wt/i.test(c.trim())) ||
@@ -1481,8 +1494,7 @@ function LedgerPane({
               const isPartiallyApproved =
                 !isFullyApproved &&
                 groupIndices.some((idx) => selected.includes(idx));
-              const isRowApproved =
-                isFullyApproved || selected.includes(index);
+              const isRowApproved = isFullyApproved || selected.includes(index);
 
               const band = getEntryBandStyle(bandIndex, entryColorPalette);
               const user = getAuthUser();
@@ -2223,6 +2235,39 @@ export function DynamicReportViewer({
     );
   }, [startDate, endDate, selectedType, selectedOwner, selectedStatus, query]);
 
+  // Listen for navigation from Approvals tab → open specific report
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const reportId = (e as CustomEvent<{ reportId: string }>).detail?.reportId;
+      if (!reportId) return;
+
+      // Try to find in already loaded list first
+      const found = savedReports.find(
+        (r) => r.reportId === reportId || r._id === reportId,
+      );
+      if (found) {
+        selectReport(found);
+        return;
+      }
+
+      // Fallback: fetch directly from API
+      try {
+        const res = await authFetch(`/api/reports/${reportId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.data) {
+            selectReport(data.data as ReportItem);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener("sg:open-report", handler);
+    return () => window.removeEventListener("sg:open-report", handler);
+  }, [savedReports]);
+
   const refreshAllData = async (
     sDate?: string,
     eDate?: string,
@@ -2232,7 +2277,10 @@ export function DynamicReportViewer({
     searchVal?: string,
   ) => {
     await Promise.all([
-      loadFilterOptions(sDate !== undefined ? sDate : startDate, eDate !== undefined ? eDate : endDate),
+      loadFilterOptions(
+        sDate !== undefined ? sDate : startDate,
+        eDate !== undefined ? eDate : endDate,
+      ),
       loadSavedReports(sDate, eDate, typeVal, ownerVal, statusVal, searchVal),
     ]);
   };
@@ -2421,7 +2469,7 @@ export function DynamicReportViewer({
     }));
     const filled = fillSubEntriesFromMain(sanitized, headers);
     const processedRows = splitMergedEntries(filled, headers);
-    
+
     const isMelting = cleanName.toLowerCase().includes("melting");
 
     if (isMelting) {
@@ -2766,12 +2814,8 @@ export function DynamicReportViewer({
       if (hasTypeVal) return true;
     }
 
-    const hasDebitCol = columns.some((c) =>
-      /debit|dr\.?$/i.test(c.trim()),
-    );
-    const hasCreditCol = columns.some((c) =>
-      /credit|cr\.?$/i.test(c.trim()),
-    );
+    const hasDebitCol = columns.some((c) => /debit|dr\.?$/i.test(c.trim()));
+    const hasCreditCol = columns.some((c) => /credit|cr\.?$/i.test(c.trim()));
     if (hasDebitCol || hasCreditCol) return true;
 
     if (
@@ -2822,6 +2866,10 @@ export function DynamicReportViewer({
     [rows, query],
   );
 
+  // Reset table page when search query or loaded rows change
+  // (placed here so it runs after visibleGridRows is computed)
+  // We derive it from visibleGridRows length via an effect below.
+
   const visibleGridRows = useMemo(
     () =>
       filteredRows.filter((row, index) => {
@@ -2844,6 +2892,8 @@ export function DynamicReportViewer({
       }),
     [filteredRows, rowGroupMeta, columns],
   );
+
+
 
   const grandTotals = useMemo(() => {
     const totals: Record<string, number> = {};
@@ -2941,7 +2991,10 @@ export function DynamicReportViewer({
 
   const handleDeleteReport = () => {
     const targetId =
-      selectedReportId || reportId || activeReportMeta?._id || activeReportMeta?.reportId;
+      selectedReportId ||
+      reportId ||
+      activeReportMeta?._id ||
+      activeReportMeta?.reportId;
     if (!targetId) {
       setNotice("No report is currently loaded to delete.");
       window.setTimeout(() => setNotice(""), 3000);
@@ -2952,7 +3005,10 @@ export function DynamicReportViewer({
 
   const confirmDeleteReport = async () => {
     const targetId =
-      selectedReportId || reportId || activeReportMeta?._id || activeReportMeta?.reportId;
+      selectedReportId ||
+      reportId ||
+      activeReportMeta?._id ||
+      activeReportMeta?.reportId;
     if (!targetId) return;
 
     setDeletingReport(true);
@@ -2993,20 +3049,43 @@ export function DynamicReportViewer({
   };
 
   const saveApprovalsToBackend = async () => {
-    if (!selected.length) {
-      toast("Select at least one row to approve");
-      return;
-    }
-
     const activeId = reportId || selectedReportId || "REP-CURRENT";
-    let backendMsg = `${selected.length} row(s) saved with approval audit trail`;
     const currentUser = getAuthUser();
+    let backendMsg =
+      selected.length > 0
+        ? `${selected.length} row(s) saved with approval audit trail`
+        : "All approvals cleared.";
+
+    // Derive a meaningful rowId from the actual row data (first non-empty string col)
+    const idColumns = ["Party", "Name", "Description", "Item", "Particular", "TransNo", "Party Name"];
+    const getRowId = (row: Record<string, string>): string | undefined => {
+      for (const col of idColumns) {
+        const val = row[col]?.trim();
+        if (val) return val;
+      }
+      // Fallback: first non-empty, non-internal column
+      return Object.entries(row).find(
+        ([k, v]) => !k.startsWith("_") && v?.trim(),
+      )?.[1];
+    };
+
+    const selectedEntries = selected.map((idx) => {
+      const row = rows.find(
+        (r) => (r as any)._originalIndex === idx,
+      ) as Record<string, string> | undefined;
+      return {
+        rowIndex: idx,
+        rowId: row ? getRowId(row) : undefined,
+      };
+    });
+
     try {
       const res = await authFetch(`/api/reports/${activeId}/approvals`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           selectedIndexes: selected,
+          selectedEntries,
           approvedBy: currentUser?.name || currentUser?.email || "Unknown",
         }),
       });
@@ -3024,6 +3103,7 @@ export function DynamicReportViewer({
 
     toast(backendMsg);
   };
+
 
   const exportFilteredRowsToXlsx = () => {
     if (filteredRows.length === 0) {
@@ -3119,40 +3199,38 @@ export function DynamicReportViewer({
 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Dynamic Date-wise Report Type Filter Dropdown */}
-            {availableReportTypes.length > 0 && (
-              <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/90 px-2.5 py-1">
-                <Filter size={12} className="text-slate-400" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Report Type:
-                </span>
-                <select
-                  value={selectedType}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSelectedType(val);
-                    if (val) {
-                      const rep = savedReports.find(
-                        (r) =>
-                          r.name === val ||
-                          r.type === val ||
-                          (r._id || r.reportId) === val,
-                      );
-                      if (rep) selectReport(rep);
-                    }
-                  }}
-                  className="h-7 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#8fc3e0]"
-                >
-                  <option value="">
-                    All Types ({availableReportTypes.length})
+            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/90 px-2.5 py-1">
+              <Filter size={12} className="text-slate-400" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Report Type:
+              </span>
+              <select
+                value={selectedType}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedType(val);
+                  if (val) {
+                    const rep = savedReports.find(
+                      (r) =>
+                        r.name === val ||
+                        r.type === val ||
+                        (r._id || r.reportId) === val,
+                    );
+                    if (rep) selectReport(rep);
+                  }
+                }}
+                className="h-7 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#8fc3e0]"
+              >
+                <option value="">
+                  All Types ({availableReportTypes.length})
+                </option>
+                {availableReportTypes.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
                   </option>
-                  {availableReportTypes.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+                ))}
+              </select>
+            </div>
 
             {/* Date Range Filter */}
             <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/80 p-1">
@@ -3264,11 +3342,14 @@ export function DynamicReportViewer({
             <h3 className="text-base font-bold text-slate-800">
               {fileName
                 ? `No data available in "${fileName}"`
+                : (startDate || endDate)
+                ? "No reports found for the selected date range"
                 : "No report dataset selected"}
             </h3>
             <p className="mx-auto mt-1.5 mb-5 max-w-sm text-xs text-slate-500">
-              Select a report from the dropdown above or upload a spreadsheet
-              file to view report data.
+              {(startDate || endDate)
+                ? "Try adjusting your FROM and TO date filters or clear the date filter."
+                : "Select a report from the dropdown above or upload a spreadsheet file to view report data."}
             </p>
             {permissions.add && (
               <button
@@ -3718,7 +3799,9 @@ export function DynamicReportViewer({
                                 }`}
                               >
                                 {isPurityCol ? (
-                                  isNewEntryStart && purityValue !== "—" && purityValue !== "" ? (
+                                  isNewEntryStart &&
+                                  purityValue !== "—" &&
+                                  purityValue !== "" ? (
                                     <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200 shadow-xs whitespace-nowrap">
                                       {purityValue}
                                     </span>
@@ -3761,25 +3844,23 @@ export function DynamicReportViewer({
                               key={column}
                               className="border-l border-white/10 px-4 py-3 text-right text-xs font-bold whitespace-nowrap align-middle font-mono"
                             >
-                              {isPurityCol ? (
-                                grandTotalPurity
-                              ) : numericColumnsForTotals.includes(column) ? (
-                                (grandTotals[column] ?? 0).toLocaleString(
-                                  "en-IN",
-                                  {
-                                    minimumFractionDigits: Number.isInteger(
-                                      grandTotals[column] ?? 0,
+                              {isPurityCol
+                                ? grandTotalPurity
+                                : numericColumnsForTotals.includes(column)
+                                  ? (grandTotals[column] ?? 0).toLocaleString(
+                                      "en-IN",
+                                      {
+                                        minimumFractionDigits: Number.isInteger(
+                                          grandTotals[column] ?? 0,
+                                        )
+                                          ? 0
+                                          : /wt|weight|fine/i.test(column)
+                                            ? 3
+                                            : 2,
+                                        maximumFractionDigits: 3,
+                                      },
                                     )
-                                      ? 0
-                                      : /wt|weight|fine/i.test(column)
-                                        ? 3
-                                        : 2,
-                                    maximumFractionDigits: 3,
-                                  },
-                                )
-                              ) : (
-                                ""
-                              )}
+                                  : ""}
                             </td>
                           );
                         })}
@@ -3854,6 +3935,8 @@ export function DynamicReportViewer({
               </div>
             )}
 
+
+
             {/* Footer & Approval Action */}
             <div className="flex flex-col justify-between gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:px-6">
               <p className="text-[11px] text-slate-400">
@@ -3889,7 +3972,9 @@ export function DynamicReportViewer({
                 <Trash2 size={20} />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">Delete Entire Report</h3>
+                <h3 className="text-base font-bold text-slate-900">
+                  Delete Entire Report
+                </h3>
                 <p className="text-xs text-slate-500">
                   {fileName || activeReportMeta?.name || "Selected Report"}
                 </p>
@@ -3900,7 +3985,8 @@ export function DynamicReportViewer({
               <strong className="text-slate-900 font-semibold">
                 "{fileName || activeReportMeta?.name || "this report"}"
               </strong>
-              ? This action will remove the entire report document from the system.
+              ? This action will remove the entire report document from the
+              system.
             </p>
             <div className="flex items-center justify-end gap-2.5">
               <button

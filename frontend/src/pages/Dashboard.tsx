@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronRight, Clock3, Download, FileBarChart, FileSpreadsheet, Search } from "lucide-react";
-import { StatusBadge } from "./StatusBadge";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { DashboardSummary, ReportItem } from "@shared/api";
 import { authFetch, getAuthUser } from "@/lib/apiClient";
 
-export function DashboardView() {
+function DashboardContent() {
   const user = getAuthUser();
   const formattedName = user?.name || "User";
 
@@ -255,5 +256,13 @@ export function DashboardView() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <AppLayout>
+      <DashboardContent />
+    </AppLayout>
   );
 }

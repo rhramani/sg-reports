@@ -5,9 +5,33 @@ import { DashboardSummary } from "@shared/api";
 
 export const dashboardRouter = Router();
 
+function buildCreatedAtFilter(startDate?: unknown, endDate?: unknown) {
+  const createdAtFilter: Record<string, Date> = {};
+
+  if (startDate && typeof startDate === "string" && startDate.trim()) {
+    const s = startDate.trim();
+    const startUtc = new Date(s.includes("T") ? s : `${s}T00:00:00.000Z`).getTime();
+    const startLocal = new Date(s.includes("T") ? s : `${s}T00:00:00.000`).getTime();
+    const minStart = isNaN(startLocal) ? startUtc : Math.min(startUtc, startLocal);
+    createdAtFilter.$gte = new Date(minStart);
+  }
+
+  if (endDate && typeof endDate === "string" && endDate.trim()) {
+    const e = endDate.trim();
+    const endUtc = new Date(e.includes("T") ? e : `${e}T23:59:59.999Z`).getTime();
+    const endLocal = new Date(e.includes("T") ? e : `${e}T23:59:59.999`).getTime();
+    const maxEnd = isNaN(endLocal) ? endUtc : Math.max(endUtc, endLocal);
+    createdAtFilter.$lte = new Date(maxEnd);
+  }
+
+  return Object.keys(createdAtFilter).length > 0 ? createdAtFilter : null;
+}
+
 dashboardRouter.get("/summary", async (req, res) => {
   try {
-    const period = (req.query.period as string) || "Month";
+    const fromDate = (req.query.fromDate || req.query.startDate) as string | undefined;
+    const toDate = (req.query.toDate || req.query.endDate) as string | undefined;
+    const period = (req.query.period as string) || "Custom";
     const dbStatus = getDBStatus();
 
     if (dbStatus.stateCode !== 1) {
@@ -17,7 +41,16 @@ dashboardRouter.get("/summary", async (req, res) => {
       });
     }
 
-    const reports = await ReportModel.find().sort({ createdAt: -1 });
+    const queryFilter: Record<string, unknown> = {};
+
+    if (fromDate || toDate) {
+      const createdAtFilter = buildCreatedAtFilter(fromDate, toDate);
+      if (createdAtFilter) {
+        queryFilter.createdAt = createdAtFilter;
+      }
+    }
+
+    const reports = await ReportModel.find(queryFilter).sort({ createdAt: -1 });
     const reportsInPeriod = reports.length;
     const approvedReports = reports.filter((r) => r.status === "Approved").length;
     const pendingReview = reports.filter((r) => r.status === "Pending" || r.status === "Review").length;
@@ -37,9 +70,10 @@ dashboardRouter.get("/summary", async (req, res) => {
     res.json({
       success: true,
       data: summary,
-      message: `Dashboard summary for ${period} retrieved successfully from database.`,
+      message: "Dashboard summary retrieved successfully from database.",
     });
   } catch (error) {
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
+

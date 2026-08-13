@@ -1,6 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { authenticateToken, AuthRequest } from "../middleware/auth";
+import { authenticateToken, AuthRequest, generateToken } from "../middleware/auth";
 import { UserModel } from "../models/User";
 import { RoleModel } from "../models/Role";
 import { getDefaultModulePermissions } from "./roles";
@@ -82,7 +82,7 @@ profileRouter.put("/", authenticateToken, async (req: AuthRequest, res) => {
       return res.status(401).json({ success: false, error: "Unauthorized access." });
     }
 
-    const { name, mobileNumber, department, avatar, bio, notifications, role } = req.body || {};
+    const { name, email, mobileNumber, department, avatar, bio, notifications, role } = req.body || {};
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: "Full name cannot be empty.", field: "name" });
@@ -96,6 +96,22 @@ profileRouter.put("/", authenticateToken, async (req: AuthRequest, res) => {
     const dbUser = await UserModel.findOne({ email: req.user.email.toLowerCase() });
     if (!dbUser) {
       return res.status(404).json({ success: false, error: "User profile not found." });
+    }
+
+    if (email && email.trim()) {
+      const newEmail = email.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(newEmail)) {
+        return res.status(400).json({ success: false, error: "Please enter a valid email address.", field: "email" });
+      }
+
+      if (newEmail !== dbUser.email.toLowerCase()) {
+        const existingUser = await UserModel.findOne({ email: newEmail });
+        if (existingUser) {
+          return res.status(400).json({ success: false, error: "This email address is already in use by another account.", field: "email" });
+        }
+        dbUser.email = newEmail;
+      }
     }
 
     // Role modification check: only Admins / Super Admins can alter roles
@@ -158,6 +174,8 @@ profileRouter.put("/", authenticateToken, async (req: AuthRequest, res) => {
       status: dbUser.status,
     };
 
+    const { token: newToken } = generateToken(updatedUserSession);
+
     await logActivity(req, {
       module: "Profile",
       section: "Personal Details",
@@ -168,6 +186,7 @@ profileRouter.put("/", authenticateToken, async (req: AuthRequest, res) => {
     res.json({
       success: true,
       data: updatedUserSession,
+      token: newToken,
       message: "Profile updated successfully.",
     });
   } catch (error) {
@@ -194,8 +213,8 @@ profileRouter.post("/password", authenticateToken, async (req: AuthRequest, res)
       return res.status(400).json({ success: false, error: "New password is required.", field: "newPassword" });
     }
 
-    if (newPassword.trim().length < 6) {
-      return res.status(400).json({ success: false, error: "New password must be at least 6 characters long.", field: "newPassword" });
+    if (newPassword.trim().length < 8) {
+      return res.status(400).json({ success: false, error: "New password must be at least 8 characters long.", field: "newPassword" });
     }
 
     if (newPassword !== confirmPassword) {

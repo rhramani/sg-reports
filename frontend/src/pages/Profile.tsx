@@ -16,9 +16,11 @@ import {
   EyeOff,
   ChevronRight,
 } from "lucide-react";
+import { AppLayout } from "@/components/layout/AppLayout";
 import { authFetch, getAuthUser, setAuthSession, getAuthToken } from "@/lib/apiClient";
 import type { UserSession } from "@shared/api";
-import { CountryPhoneInput } from "../ui/CountryPhoneInput";
+import { CountryPhoneInput } from "@/components/ui/CountryPhoneInput";
+import { useAppLayout } from "@/lib/AppLayoutContext";
 
 const PRESET_AVATARS = [
   "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
@@ -48,17 +50,19 @@ function getRoleBadgeStyle(role: string) {
   }
 }
 
-export function ProfileView({
-  initialTab = "details",
-}: {
-  initialTab?: "details" | "security";
-}) {
+function ProfileContent() {
+  const { profileTab } = useAppLayout();
   const [sessionUser, setSessionUser] = useState<UserSession | null>(getAuthUser());
   const [activeTab, setActiveTab] = useState<"details" | "security">(
-    initialTab === "security" ? "security" : "details"
+    profileTab === "security" ? "security" : "details"
   );
 
-  // Profile Form state
+  useEffect(() => {
+    if (profileTab) {
+      setActiveTab(profileTab);
+    }
+  }, [profileTab]);
+
   const [name, setName] = useState(sessionUser?.name || "");
   const [email, setEmail] = useState(sessionUser?.email || "");
   const [mobileNumber, setMobileNumber] = useState(sessionUser?.mobileNumber || "");
@@ -67,16 +71,13 @@ export function ProfileView({
   const [avatar, setAvatar] = useState(sessionUser?.avatar || "");
   const [bio, setBio] = useState(sessionUser?.bio || "");
 
-  // Photo modal & avatar upload state
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Status & Feedback state
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  // Security Form state
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -84,13 +85,6 @@ export function ProfileView({
   const [showNewPw, setShowNewPw] = useState(false);
   const [pwLoading, setPwLoading] = useState(false);
 
-  useEffect(() => {
-    if (initialTab === "security" || initialTab === "details") {
-      setActiveTab(initialTab);
-    }
-  }, [initialTab]);
-
-  // Fetch full profile data from GET /api/profile
   const loadProfile = () => {
     setFetching(true);
     authFetch("/api/profile")
@@ -109,7 +103,6 @@ export function ProfileView({
           setAvatar(u.avatar || "");
           setBio(u.bio || "");
 
-          // Update local session
           const token = getAuthToken();
           if (token) setAuthSession(token, u);
         }
@@ -124,7 +117,6 @@ export function ProfileView({
     loadProfile();
   }, []);
 
-  // Save Profile Handler
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setNotice(null);
@@ -161,7 +153,6 @@ export function ProfileView({
         const token = data.token || getAuthToken();
         if (token) setAuthSession(token, updatedUser);
 
-        // Notify other components (like header bar) via custom event
         window.dispatchEvent(new Event("profile-updated"));
       } else {
         setNotice({ type: "error", message: data.error || "Failed to update profile." });
@@ -173,7 +164,6 @@ export function ProfileView({
     }
   };
 
-  // Password Change Handler
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setNotice(null);
@@ -212,7 +202,6 @@ export function ProfileView({
     }
   };
 
-  // Custom Photo File Upload handler
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -232,7 +221,6 @@ export function ProfileView({
     reader.readAsDataURL(file);
   };
 
-  // Password Strength calculation
   const getPasswordStrength = (pw: string) => {
     if (pw.length < 8) {
       return { label: "Too Short (Min 8 chars)", color: "bg-rose-500", text: "text-rose-600" };
@@ -253,16 +241,13 @@ export function ProfileView({
 
   return (
     <div className="w-full max-w-none px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* ── BREADCRUMB ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
         <span>Main menu</span>
         <ChevronRight size={12} />
         <span className="text-slate-600">Profile</span>
       </div>
 
-      {/* ── HEADER USER CARD ────────────────────────────────────────────────── */}
       <div className="relative rounded-2xl border border-slate-200/80 bg-white p-6 sm:p-8 shadow-[0_3px_15px_rgba(28,25,64,0.03)] flex flex-col md:flex-row items-center md:items-start gap-6">
-        {/* Avatar with Upload button overlay */}
         <div className="relative group shrink-0">
           <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border-2 border-[#18476A]/20 bg-[#123955] shadow-md flex items-center justify-center text-white text-3xl font-bold">
             {avatar ? (
@@ -283,7 +268,6 @@ export function ProfileView({
           </button>
         </div>
 
-        {/* User Bio & Info */}
         <div className="flex-1 text-center md:text-left space-y-2.5">
           <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
@@ -329,7 +313,6 @@ export function ProfileView({
           )}
         </div>
 
-        {/* Sync Button */}
         <button
           type="button"
           onClick={loadProfile}
@@ -341,10 +324,9 @@ export function ProfileView({
         </button>
       </div>
 
-      {/* ── NOTIFICATION FEEDBACK BANNER ─────────────────────────────────── */}
       {notice && (
         <div
-          className={`p-4 rounded-xl border flex items-center justify-between text-xs sm:text-sm transition-all animate-fadeIn ${
+          className={`p-4 rounded-xl border flex items-center justify-between text-xs sm:text-sm transition-all ${
             notice.type === "success"
               ? "bg-emerald-50 border-emerald-200 text-emerald-800"
               : "bg-rose-50 border-rose-200 text-rose-800"
@@ -367,7 +349,6 @@ export function ProfileView({
         </div>
       )}
 
-      {/* ── PROFILE TAB NAVIGATION ──────────────────────────────────────────── */}
       <div className="flex border-b border-slate-200 gap-2 md:gap-4 overflow-x-auto">
         <button
           type="button"
@@ -396,8 +377,6 @@ export function ProfileView({
         </button>
       </div>
 
-      {/* ── TAB CONTENT ─────────────────────────────────────────────────────── */}
-      {/* TAB 1: PERSONAL DETAILS */}
       {activeTab === "details" && (
         <form onSubmit={handleSaveProfile} className="space-y-6">
           <div className="rounded-2xl border border-slate-200/80 bg-white p-6 sm:p-8 shadow-[0_3px_15px_rgba(28,25,64,0.03)] space-y-6">
@@ -408,13 +387,9 @@ export function ProfileView({
                   Update your display name, contact phone, department, and bio.
                 </p>
               </div>
-              <span className="text-xs font-mono font-bold text-[#18476A] bg-[#eef6fa] px-3 py-1 rounded-full border border-[#bce0f2]">
-                CRM ID: #{sessionUser?.email.split("@")[0]}
-              </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Full Name */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Full Name <span className="text-rose-500">*</span>
@@ -432,7 +407,6 @@ export function ProfileView({
                 </div>
               </div>
 
-              {/* Work Email */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center justify-between">
                   <span>
@@ -453,7 +427,6 @@ export function ProfileView({
                 </div>
               </div>
 
-              {/* Mobile Phone Number */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Mobile / Phone Number
@@ -467,7 +440,6 @@ export function ProfileView({
                 />
               </div>
 
-              {/* Department / Title */}
               {/* <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Department / Job Title
@@ -484,7 +456,6 @@ export function ProfileView({
                 </div>
               </div> */}
 
-              {/* Assigned Role */}
               <div className="space-y-1.5 md:col-span-2">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center justify-between">
                   <span>Assigned CRM Role</span>
@@ -508,7 +479,6 @@ export function ProfileView({
                 </div>
               </div>
 
-              {/* Bio / Work Summary */}
               <div className="space-y-1.5 md:col-span-2">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Professional Bio / Notes
@@ -523,7 +493,6 @@ export function ProfileView({
               </div>
             </div>
 
-            {/* Form submit button */}
             <div className="flex justify-end pt-4 border-t border-slate-100">
               <button
                 type="submit"
@@ -542,7 +511,6 @@ export function ProfileView({
         </form>
       )}
 
-      {/* TAB 2: SECURITY & PASSWORD */}
       {activeTab === "security" && (
         <form onSubmit={handleChangePassword} className="space-y-6">
           <div className="rounded-2xl border border-slate-200/80 bg-white p-6 sm:p-8 shadow-[0_3px_15px_rgba(28,25,64,0.03)] space-y-6">
@@ -554,7 +522,6 @@ export function ProfileView({
             </div>
 
             <div className="max-w-xl space-y-5">
-              {/* Current Password */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Current Password <span className="text-rose-500">*</span>
@@ -579,7 +546,6 @@ export function ProfileView({
                 </div>
               </div>
 
-              {/* New Password */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                   New Password <span className="text-rose-500">*</span>
@@ -603,7 +569,6 @@ export function ProfileView({
                   </button>
                 </div>
 
-                {/* Password strength meter */}
                 {newPassword && (
                   <div className="space-y-1 pt-1">
                     <div className="flex items-center justify-between text-[11px]">
@@ -627,7 +592,6 @@ export function ProfileView({
                 )}
               </div>
 
-              {/* Confirm New Password */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Confirm New Password <span className="text-rose-500">*</span>
@@ -667,7 +631,6 @@ export function ProfileView({
         </form>
       )}
 
-      {/* ── PHOTO SELECTION MODAL ───────────────────────────────────────────── */}
       {showPhotoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 space-y-6 shadow-2xl">
@@ -681,7 +644,6 @@ export function ProfileView({
               </button>
             </div>
 
-            {/* Avatar Library Presets */}
             <div className="space-y-3">
               <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                 Preset Avatars
@@ -705,7 +667,6 @@ export function ProfileView({
               </div>
             </div>
 
-            {/* Local File Upload */}
             <div className="space-y-3 pt-4 border-t border-slate-100">
               <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                 Upload Custom Photo
@@ -730,5 +691,13 @@ export function ProfileView({
         </div>
       )}
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <AppLayout>
+      <ProfileContent />
+    </AppLayout>
   );
 }
