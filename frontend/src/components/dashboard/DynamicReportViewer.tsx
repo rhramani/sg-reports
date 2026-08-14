@@ -1265,14 +1265,23 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
     }
   });
 
+  const isRateCutReport =
+    headers.some((h) => /rate\s*cut|purchase.*rate|sale.*rate|rat\s*cut/i.test(h)) ||
+    parsed.some((r) =>
+      Object.values(r).some((v) =>
+        /rate\s*cut|rat\s*cut|purchase\s*rate|sale\s*rate/i.test(String(v)),
+      ),
+    );
+
   const hasReceiveReturn =
+    isRateCutReport ||
     mainHeaders.some((g) =>
-      /receive|return|receipt|issue|plus|minus|metal transfer|material customer/i.test(
+      /receive|return|receipt|issue|plus|minus|metal transfer|material customer|rate cut/i.test(
         g.title,
       ),
     ) ||
     headers.some((h) =>
-      /debit|credit|dr|cr|receipt|receive|return|issue|inout|plus|minus|p\.?type/i.test(
+      /debit|credit|dr|cr|receipt|receive|return|issue|inout|plus|minus|p\.?type|rate\s*cut/i.test(
         h,
       ),
     );
@@ -1289,13 +1298,15 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
 
   const detectedReportType = isMeltingReport
     ? "Metal Melting / In-Out Balance Report"
-    : hasCreditDebitCols
-      ? isMultiLevel
-        ? "Metal Journal Receive / Return Ledger"
-        : "Credit / Debit Financial Ledger"
-      : isMultiLevel
-        ? `Multi-Level Table (${headerLevels.length + 1} Header Tiers)`
-        : "Standard Tabular Spreadsheet";
+    : isRateCutReport
+      ? "Rate Cut Purchase & Sale Ledger"
+      : hasCreditDebitCols
+        ? isMultiLevel
+          ? "Metal Journal Receive / Return Ledger"
+          : "Credit / Debit Financial Ledger"
+        : isMultiLevel
+          ? `Multi-Level Table (${headerLevels.length + 1} Header Tiers)`
+          : "Standard Tabular Spreadsheet";
 
   const headerStructure: HeaderStructure = {
     isMultiLevel,
@@ -2002,6 +2013,9 @@ interface LedgerTableViewProps {
   entryColorPalette?: EntryColorPaletteKey;
   onDeleteRow?: (index: number) => void;
   canDelete?: boolean;
+  fileName?: string;
+  reportName?: string;
+  reportType?: string;
 }
 
 function LedgerTableView({
@@ -2017,6 +2031,9 @@ function LedgerTableView({
   entryColorPalette,
   onDeleteRow,
   canDelete = false,
+  fileName = "",
+  reportName = "",
+  reportType = "",
 }: LedgerTableViewProps) {
   const parseAmt = (val: any) => {
     if (!val) return 0;
@@ -2073,6 +2090,40 @@ function LedgerTableView({
       /type|category|nature|dr.?cr|credit.?debit|p\.?type|inout/i.test(col),
     );
 
+  const isRateCut = useMemo(() => {
+    const nameStr = (fileName || reportName || "").toLowerCase();
+    const metaType = (reportType || "").toLowerCase();
+    const cleanName = (str: string) => str.replace(/[^a-z0-9]/g, "");
+
+    if (
+      cleanName(nameStr).includes("ratecut") ||
+      cleanName(nameStr).includes("ratcut") ||
+      cleanName(metaType).includes("ratecut") ||
+      cleanName(metaType).includes("ratcut")
+    ) {
+      return true;
+    }
+
+    return (
+      displayCols.some((c) => /rate\s*cut|rat\s*cut/i.test(c)) ||
+      rows.some((r) => {
+        const val = String(
+          r["Book Name"] || r["BookHeadName"] || r["Type"] || r["Category"] || r["P.Type"] || "",
+        ).toLowerCase();
+        if (
+          val.includes("rate cut") ||
+          val.includes("ratecut") ||
+          val.includes("rat cut")
+        ) {
+          return true;
+        }
+        return Object.values(r).some((v) =>
+          /rate\s*cut|rat\s*cut|purchase\s*rate|sale\s*rate/i.test(String(v)),
+        );
+      })
+    );
+  }, [fileName, reportName, reportType, displayCols, rows]);
+
   let currentGroup = "";
   const allEntries = rows.map((row, loopIndex) => {
     const origIndex =
@@ -2098,197 +2149,219 @@ function LedgerTableView({
 
   const entries = allEntries.filter((e) => !e.isTotalRow);
 
-  const debit = entries.filter(({ row }) => {
+  const isPurchaseRow = (row: Record<string, any>, groupName: string = "") => {
     const bookName = String(
-      row["Book Name"] || row["BookHeadName"] || "",
+      row["Book Name"] || row["BookHeadName"] || row["Type"] || row["Category"] || row["P.Type"] || groupName || "",
     ).toLowerCase();
-    if (/receive|receipt|mtr|plus/i.test(bookName)) return true;
 
-    const netWtRec = parseAmt(row["Net Weight"]);
-    const pureWtRec = parseAmt(row["Pure Weight"]);
-    const amtRec = parseAmt(row["Amount"]);
-    const netWtRet = parseAmt(row["Net Weight (2)"]);
-    const pureWtRet = parseAmt(row["Pure Weight (2)"]);
-    const amtRet = parseAmt(row["Amount (2)"]);
-
-    if (
-      (netWtRec > 0 || pureWtRec > 0 || amtRec > 0) &&
-      netWtRet === 0 &&
-      pureWtRet === 0 &&
-      amtRet === 0
-    ) {
+    if (/purchase|purch|buy|01\s*bank\s*purchase|01\s*cash\s*purchase|purchase\s*rate|^01\b/i.test(bookName)) {
       return true;
     }
-
-    if (
-      debitCol &&
-      parseAmt(row[debitCol]) > 0 &&
-      (!creditCol || parseAmt(row[creditCol]) === 0)
-    )
-      return true;
-    if (
-      creditCol &&
-      parseAmt(row[creditCol]) === 0 &&
-      debitCol &&
-      parseAmt(row[debitCol]) > 0
-    )
-      return true;
-    if (
-      typeCol &&
-      row[typeCol] &&
-      /debit|\[01\]|receipt|receive|dr|in|plus|deposit/i.test(
-        String(row[typeCol]),
-      )
-    )
-      return true;
-    if (
-      row["Type"] &&
-      /debit|\[01\]|receipt|receive|dr|in|plus|deposit/i.test(
-        String(row["Type"]),
-      )
-    )
-      return true;
-    if (row["InOut"] && /in|receive/i.test(String(row["InOut"]))) return true;
-    if (
-      typeKey &&
-      row[typeKey] &&
-      /debit|receipt|receive|in|plus|deposit/i.test(String(row[typeKey]))
-    )
-      return true;
-    return false;
-  });
-
-  const credit = entries.filter(({ row }) => {
-    const bookName = String(
-      row["Book Name"] || row["BookHeadName"] || "",
-    ).toLowerCase();
-    if (/issue|return|mti|minus/i.test(bookName)) return true;
-
-    const netWtRec = parseAmt(row["Net Weight"]);
-    const pureWtRec = parseAmt(row["Pure Weight"]);
-    const amtRec = parseAmt(row["Amount"]);
-    const netWtRet = parseAmt(row["Net Weight (2)"]);
-    const pureWtRet = parseAmt(row["Pure Weight (2)"]);
-    const amtRet = parseAmt(row["Amount (2)"]);
-
-    if (
-      (netWtRet > 0 || pureWtRet > 0 || amtRet > 0) &&
-      netWtRec === 0 &&
-      pureWtRec === 0 &&
-      amtRec === 0
-    ) {
+    const rowStr = (Object.values(row).join(" ") + " " + groupName).toLowerCase();
+    if (/purchase|purch|buy/i.test(rowStr) && !/sale|sell/i.test(rowStr)) {
       return true;
     }
-
-    if (
-      creditCol &&
-      parseAmt(row[creditCol]) > 0 &&
-      (!debitCol || parseAmt(row[debitCol]) === 0)
-    )
+    if (/^01|\b01\b/i.test(bookName)) {
       return true;
-    if (
-      debitCol &&
-      parseAmt(row[debitCol]) === 0 &&
-      creditCol &&
-      parseAmt(row[creditCol]) > 0
-    )
-      return true;
-    if (
-      typeCol &&
-      row[typeCol] &&
-      /credit|\[02\]|issue|payment|cr|out|minus|withdraw/i.test(
-        String(row[typeCol]),
-      )
-    )
-      return true;
-    if (
-      row["Type"] &&
-      /credit|\[02\]|issue|payment|cr|out|minus|withdraw/i.test(
-        String(row["Type"]),
-      )
-    )
-      return true;
-    if (row["InOut"] && /out|issue/i.test(String(row["InOut"]))) return true;
-    if (
-      typeKey &&
-      row[typeKey] &&
-      /credit|issue|payment|cr|out|minus|withdraw/i.test(String(row[typeKey]))
-    )
-      return true;
+    }
     return false;
-  });
+  };
 
-  const unassigned = entries.filter(
-    (e) => !debit.includes(e) && !credit.includes(e),
-  );
-  if (unassigned.length > 0) {
-    unassigned.forEach((e) => {
-      const rowStr = JSON.stringify(e.row).toLowerCase();
-      if (/debit|receipt|in|receive|deposit/i.test(rowStr)) {
-        debit.push(e);
-      } else if (/credit|issue|payment|out|withdraw/i.test(rowStr)) {
-        credit.push(e);
-      } else {
-        debit.push(e);
+  const isSaleRow = (row: Record<string, any>, groupName: string = "") => {
+    const bookName = String(
+      row["Book Name"] || row["BookHeadName"] || row["Type"] || row["Category"] || row["P.Type"] || groupName || "",
+    ).toLowerCase();
+
+    if (/sale|sell|sold|02\s*bank\s*sale|02\s*cash\s*sale|sale\s*rate|^02\b/i.test(bookName)) {
+      return true;
+    }
+    const rowStr = (Object.values(row).join(" ") + " " + groupName).toLowerCase();
+    if (/sale|sell|sold/i.test(rowStr) && !/purchase|purch/i.test(rowStr)) {
+      return true;
+    }
+    if (/^02|\b02\b/i.test(bookName)) {
+      return true;
+    }
+    return false;
+  };
+
+  let debit: LedgerPaneRow[];
+  let credit: LedgerPaneRow[];
+
+  if (isRateCut) {
+    // For RATE CUT: Sell entries on Left Pane (debit), Purchase entries on Right Pane (credit)
+    debit = entries.filter(({ row, group }) => isSaleRow(row, group));
+    credit = entries.filter(({ row, group }) => isPurchaseRow(row, group));
+
+    const unassigned = entries.filter(
+      (e) => !debit.includes(e) && !credit.includes(e),
+    );
+    if (unassigned.length > 0) {
+      unassigned.forEach((e) => {
+        const rowStr = (JSON.stringify(e.row) + " " + e.group).toLowerCase();
+        if (/sale|sell|02/i.test(rowStr)) {
+          debit.push(e);
+        } else {
+          credit.push(e);
+        }
+      });
+    }
+  } else {
+    debit = entries.filter(({ row }) => {
+      const bookName = String(
+        row["Book Name"] || row["BookHeadName"] || "",
+      ).toLowerCase();
+      if (/receive|receipt|mtr|plus/i.test(bookName)) return true;
+
+      const netWtRec = parseAmt(row["Net Weight"]);
+      const pureWtRec = parseAmt(row["Pure Weight"]);
+      const amtRec = parseAmt(row["Amount"]);
+      const netWtRet = parseAmt(row["Net Weight (2)"]);
+      const pureWtRet = parseAmt(row["Pure Weight (2)"]);
+      const amtRet = parseAmt(row["Amount (2)"]);
+
+      if (
+        (netWtRec > 0 || pureWtRec > 0 || amtRec > 0) &&
+        netWtRet === 0 &&
+        pureWtRet === 0 &&
+        amtRet === 0
+      ) {
+        return true;
       }
+
+      if (
+        debitCol &&
+        parseAmt(row[debitCol]) > 0 &&
+        (!creditCol || parseAmt(row[creditCol]) === 0)
+      )
+        return true;
+      if (
+        creditCol &&
+        parseAmt(row[creditCol]) === 0 &&
+        debitCol &&
+        parseAmt(row[debitCol]) > 0
+      )
+        return true;
+      if (
+        typeCol &&
+        row[typeCol] &&
+        /debit|\[01\]|receipt|receive|dr|in|plus|deposit/i.test(
+          String(row[typeCol]),
+        )
+      )
+        return true;
+      if (
+        row["Type"] &&
+        /debit|\[01\]|receipt|receive|dr|in|plus|deposit/i.test(
+          String(row["Type"]),
+        )
+      )
+        return true;
+      if (row["InOut"] && /in|receive/i.test(String(row["InOut"]))) return true;
+      if (
+        typeKey &&
+        row[typeKey] &&
+        /debit|receipt|receive|in|plus|deposit/i.test(String(row[typeKey]))
+      )
+        return true;
+      return false;
     });
+
+    credit = entries.filter(({ row }) => {
+      const bookName = String(
+        row["Book Name"] || row["BookHeadName"] || "",
+      ).toLowerCase();
+      if (/issue|return|mti|minus/i.test(bookName)) return true;
+
+      const netWtRec = parseAmt(row["Net Weight"]);
+      const pureWtRec = parseAmt(row["Pure Weight"]);
+      const amtRec = parseAmt(row["Amount"]);
+      const netWtRet = parseAmt(row["Net Weight (2)"]);
+      const pureWtRet = parseAmt(row["Pure Weight (2)"]);
+      const amtRet = parseAmt(row["Amount (2)"]);
+
+      if (
+        (netWtRet > 0 || pureWtRet > 0 || amtRet > 0) &&
+        netWtRec === 0 &&
+        pureWtRec === 0 &&
+        amtRec === 0
+      ) {
+        return true;
+      }
+
+      if (
+        creditCol &&
+        parseAmt(row[creditCol]) > 0 &&
+        (!debitCol || parseAmt(row[debitCol]) === 0)
+      )
+        return true;
+      if (
+        debitCol &&
+        parseAmt(row[debitCol]) === 0 &&
+        creditCol &&
+        parseAmt(row[creditCol]) > 0
+      )
+        return true;
+      if (
+        typeCol &&
+        row[typeCol] &&
+        /credit|\[02\]|issue|payment|cr|out|minus|withdraw/i.test(
+          String(row[typeCol]),
+        )
+      )
+        return true;
+      if (
+        row["Type"] &&
+        /credit|\[02\]|issue|payment|cr|out|minus|withdraw/i.test(
+          String(row["Type"]),
+        )
+      )
+        return true;
+      if (row["InOut"] && /out|issue/i.test(String(row["InOut"]))) return true;
+      if (
+        typeKey &&
+        row[typeKey] &&
+        /credit|issue|payment|cr|out|minus|withdraw/i.test(String(row[typeKey]))
+      )
+        return true;
+      return false;
+    });
+
+    const unassigned = entries.filter(
+      (e) => !debit.includes(e) && !credit.includes(e),
+    );
+    if (unassigned.length > 0) {
+      unassigned.forEach((e) => {
+        const rowStr = JSON.stringify(e.row).toLowerCase();
+        if (/debit|receipt|in|receive|deposit/i.test(rowStr)) {
+          debit.push(e);
+        } else if (/credit|issue|payment|out|withdraw/i.test(rowStr)) {
+          credit.push(e);
+        } else {
+          debit.push(e);
+        }
+      });
+    }
   }
 
-  const primaryKey =
-    primaryNumericKeys[primaryNumericKeys.length - 1] || amountKey || "Amt.";
-  const isWeight = /wt|weight|fine/i.test(primaryKey) || displayCols.some((c) => /net.*wt|pure.*wt/i.test(c));
-
-  let debitVerified = 0;
-  let debitUnverified = 0;
-  debit.forEach(({ row, index }) => {
-    const amt = parseAmt(
-      row["Net Weight"] !== undefined && row["Net Weight"] !== ""
-        ? row["Net Weight"]
-        : row["Pure Weight"] !== undefined && row["Pure Weight"] !== ""
-          ? row["Pure Weight"]
-          : (debitCol && row[debitCol]) ||
-            row["Debit"] ||
-            row["Dr"] ||
-            row[primaryKey] ||
-            row["Amount"],
-    );
-    if (selected.includes(index)) {
-      debitVerified += amt;
-    } else {
-      debitUnverified += amt;
+  const getRowValue = (row: Record<string, any>, isDebitSide: boolean) => {
+    if (isRateCut) {
+      const amtVal = parseAmt(
+        row["Amount"] !== undefined && row["Amount"] !== ""
+          ? row["Amount"]
+          : row["Amount (2)"] !== undefined && row["Amount (2)"] !== ""
+            ? row["Amount (2)"]
+            : (debitCol && isDebitSide ? row[debitCol] : creditCol && !isDebitSide ? row[creditCol] : undefined) ||
+              row["Amt."] ||
+              row["Amt"] ||
+              row[amountKey] ||
+              row[primaryKey],
+      );
+      return amtVal;
     }
-  });
-  const debitSubTotal = debitVerified + debitUnverified;
 
-  let creditVerified = 0;
-  let creditUnverified = 0;
-  credit.forEach(({ row, index }) => {
-    const amt = parseAmt(
-      row["Net Weight (2)"] !== undefined && row["Net Weight (2)"] !== ""
-        ? row["Net Weight (2)"]
-        : row["Net Weight"] !== undefined && row["Net Weight"] !== ""
-          ? row["Net Weight"]
-          : row["Pure Weight (2)"] !== undefined && row["Pure Weight (2)"] !== ""
-            ? row["Pure Weight (2)"]
-            : (creditCol && row[creditCol]) ||
-              row["Credit"] ||
-              row["Cr"] ||
-              row[primaryKey] ||
-              row["Amount"],
-    );
-    if (selected.includes(index)) {
-      creditVerified += amt;
-    } else {
-      creditUnverified += amt;
-    }
-  });
-  const creditSubTotal = creditVerified + creditUnverified;
-
-  const txnDebitTotal = debit.reduce((sum, { row }) => {
-    if (isOpeningBalanceRow(row, displayCols)) return sum;
-    return (
-      sum +
-      parseAmt(
+    if (isDebitSide) {
+      return parseAmt(
         row["Net Weight"] !== undefined && row["Net Weight"] !== ""
           ? row["Net Weight"]
           : row["Pure Weight"] !== undefined && row["Pure Weight"] !== ""
@@ -2298,15 +2371,9 @@ function LedgerTableView({
               row["Dr"] ||
               row[primaryKey] ||
               row["Amount"],
-      )
-    );
-  }, 0);
-
-  const txnCreditTotal = credit.reduce((sum, { row }) => {
-    if (isOpeningBalanceRow(row, displayCols)) return sum;
-    return (
-      sum +
-      parseAmt(
+      );
+    } else {
+      return parseAmt(
         row["Net Weight (2)"] !== undefined && row["Net Weight (2)"] !== ""
           ? row["Net Weight (2)"]
           : row["Net Weight"] !== undefined && row["Net Weight"] !== ""
@@ -2318,22 +2385,163 @@ function LedgerTableView({
                 row["Cr"] ||
                 row[primaryKey] ||
                 row["Amount"],
-      )
-    );
+      );
+    }
+  };
+
+  const primaryKey =
+    primaryNumericKeys[primaryNumericKeys.length - 1] || amountKey || "Amt.";
+  const isWeight = isRateCut
+    ? false
+    : /wt|weight|fine/i.test(primaryKey) || displayCols.some((c) => /net.*wt|pure.*wt/i.test(c));
+
+  let debitVerified = 0;
+  let debitUnverified = 0;
+  debit.forEach(({ row, index }) => {
+    const amt = getRowValue(row, true);
+    if (selected.includes(index)) {
+      debitVerified += amt;
+    } else {
+      debitUnverified += amt;
+    }
+  });
+  const debitSubTotal = debitVerified + debitUnverified;
+
+  let creditVerified = 0;
+  let creditUnverified = 0;
+  credit.forEach(({ row, index }) => {
+    const amt = getRowValue(row, false);
+    if (selected.includes(index)) {
+      creditVerified += amt;
+    } else {
+      creditUnverified += amt;
+    }
+  });
+  const creditSubTotal = creditVerified + creditUnverified;
+
+  const txnDebitTotal = debit.reduce((sum, { row }) => {
+    if (isOpeningBalanceRow(row, displayCols)) return sum;
+    return sum + getRowValue(row, true);
+  }, 0);
+
+  const txnCreditTotal = credit.reduce((sum, { row }) => {
+    if (isOpeningBalanceRow(row, displayCols)) return sum;
+    return sum + getRowValue(row, false);
   }, 0);
 
   const totalReceipt = txnDebitTotal > 0 ? txnDebitTotal : debitSubTotal;
   const totalIssue = txnCreditTotal > 0 ? txnCreditTotal : creditSubTotal;
   const closingBalance = debitSubTotal - creditSubTotal;
 
-  const isMetalJournal =
-    displayCols.some((c) => /net.*wt|pure.*wt/i.test(c)) ||
-    displayCols.some((c) => /\(\d+\)$/.test(c)) ||
-    rows.some((r) =>
-      /metal transfer|material customer/i.test(
-        String(r["Book Name"] || r["BookHeadName"] || ""),
-      ),
+  // Additional dynamic calculation for Rate Cut or multi-numeric column ledgers
+  const rateCutMetrics = useMemo(() => {
+    if (!isRateCut) return [];
+    // Filter out Amount since Amount is already displayed in the main Sub Total / TOTAL SALE / TOTAL PURCHASE rows!
+    const nonAmtCols = displayCols.filter(
+      (c) =>
+        /net.*wt|weight|fine|pure.*wt/i.test(c.trim()) &&
+        !/rate|price|amount|amt/i.test(c.trim()),
     );
+    const colsToSum = nonAmtCols;
+
+    return colsToSum.map((colKey) => {
+      const isWt = /wt|weight|fine/i.test(colKey);
+
+      let leftVer = 0;
+      let leftUnver = 0;
+      debit.forEach(({ row, index }) => {
+        const val = parseAmt(row[colKey]);
+        if (selected.includes(index)) leftVer += val;
+        else leftUnver += val;
+      });
+      const leftTotal = leftVer + leftUnver;
+
+      let rightVer = 0;
+      let rightUnver = 0;
+      credit.forEach(({ row, index }) => {
+        const val = parseAmt(row[colKey]);
+        if (selected.includes(index)) rightVer += val;
+        else rightUnver += val;
+      });
+      const rightTotal = rightVer + rightUnver;
+
+      const balance = rightTotal - leftTotal;
+
+      return {
+        colKey,
+        isWt,
+        leftVer,
+        leftUnver,
+        leftTotal,
+        rightVer,
+        rightUnver,
+        rightTotal,
+        balance,
+      };
+    });
+  }, [isRateCut, displayCols, primaryNumericKeys, debit, credit, selected]);
+
+  const { saleAvgRate, purchAvgRate } = useMemo(() => {
+    if (!isRateCut) return { saleAvgRate: 0, purchAvgRate: 0 };
+
+    const rateCol = displayCols.find((c) => /^rate$|^price$|^unit.*rate$/i.test(c.trim()));
+
+    let saleWt = 0;
+    let saleAmt = 0;
+    let saleRateSum = 0;
+    let saleRateCount = 0;
+
+    debit.forEach(({ row }) => {
+      const wt = parseAmt(row["Net Weight"] || row["Pure Weight"] || row["Weight"]);
+      const amt = parseAmt(row["Amount"] || row["Amount (2)"] || row["Amt."] || row["Amt"]);
+      const r = rateCol ? parseAmt(row[rateCol]) : parseAmt(row["Rate"] || row["Price"]);
+
+      saleWt += wt;
+      saleAmt += amt;
+      if (r > 0) {
+        saleRateSum += r;
+        saleRateCount++;
+      }
+    });
+
+    const saleWeightedAvg = saleWt > 0 && saleAmt > 0 ? saleAmt / saleWt : 0;
+    const saleSimpleAvg = saleRateCount > 0 ? saleRateSum / saleRateCount : 0;
+    const saleAvgRate = saleWeightedAvg > 0 ? saleWeightedAvg : saleSimpleAvg;
+
+    let purchWt = 0;
+    let purchAmt = 0;
+    let purchRateSum = 0;
+    let purchRateCount = 0;
+
+    credit.forEach(({ row }) => {
+      const wt = parseAmt(row["Net Weight"] || row["Net Weight (2)"] || row["Pure Weight"] || row["Weight"]);
+      const amt = parseAmt(row["Amount"] || row["Amount (2)"] || row["Amt."] || row["Amt"]);
+      const r = rateCol ? parseAmt(row[rateCol]) : parseAmt(row["Rate"] || row["Price"]);
+
+      purchWt += wt;
+      purchAmt += amt;
+      if (r > 0) {
+        purchRateSum += r;
+        purchRateCount++;
+      }
+    });
+
+    const purchWeightedAvg = purchWt > 0 && purchAmt > 0 ? purchAmt / purchWt : 0;
+    const purchSimpleAvg = purchRateCount > 0 ? purchRateSum / purchRateCount : 0;
+    const purchAvgRate = purchWeightedAvg > 0 ? purchWeightedAvg : purchSimpleAvg;
+
+    return { saleAvgRate, purchAvgRate };
+  }, [isRateCut, debit, credit, displayCols]);
+
+  const isMetalJournal =
+    !isRateCut &&
+    (displayCols.some((c) => /net.*wt|pure.*wt/i.test(c)) ||
+      displayCols.some((c) => /\(\d+\)$/.test(c)) ||
+      rows.some((r) =>
+        /metal transfer|material customer/i.test(
+          String(r["Book Name"] || r["BookHeadName"] || ""),
+        ),
+      ));
 
   const [hoveredPairId, setHoveredPairId] = useState<string | null>(null);
 
@@ -2370,22 +2578,80 @@ function LedgerTableView({
     return pairAndAlignLedgerEntries(debit, credit);
   }, [debit, credit, isMetalJournal]);
 
-  const leftPaneTitle = isMetalJournal
-    ? "Material Customer Receive (Plus)"
-    : "Credit entry";
+  const leftPaneTitle = isRateCut
+    ? "02 SALE RATE CUT (SELL)"
+    : isMetalJournal
+      ? "Material Customer Receive (Plus)"
+      : "Credit entry";
 
-  const rightPaneTitle = isMetalJournal
-    ? "Material Customer Return (Minus)"
-    : "Debit entry";
+  const rightPaneTitle = isRateCut
+    ? "01 PURCHASE RATE CUT (PURCHASE)"
+    : isMetalJournal
+      ? "Material Customer Return (Minus)"
+      : "Debit entry";
+
+  const handleToggleApproval = (targetIndex: number) => {
+    let pairedIndex = -1;
+    if (isMetalJournal) {
+      for (let k = 0; k < alignedDebit.length; k++) {
+        const d = alignedDebit[k] as LedgerPaneRow;
+        const c = alignedCredit[k] as LedgerPaneRow;
+        if (d && c && !d.isPlaceholder && !c.isPlaceholder) {
+          if (d.index === targetIndex && c.index >= 0) {
+            pairedIndex = c.index;
+            break;
+          } else if (c.index === targetIndex && d.index >= 0) {
+            pairedIndex = d.index;
+            break;
+          }
+        }
+      }
+    }
+
+    const indicesToToggle = new Set<number>();
+    indicesToToggle.add(targetIndex);
+
+    if (getRelatedGroupIndices) {
+      getRelatedGroupIndices(targetIndex).forEach((i) => indicesToToggle.add(i));
+    }
+
+    if (pairedIndex >= 0) {
+      indicesToToggle.add(pairedIndex);
+      if (getRelatedGroupIndices) {
+        getRelatedGroupIndices(pairedIndex).forEach((i) => indicesToToggle.add(i));
+      }
+    }
+
+    const targetList = Array.from(indicesToToggle);
+    const isTargetSelected = selected.includes(targetIndex);
+
+    if (isTargetSelected) {
+      targetList.forEach((idx) => {
+        if (selected.includes(idx)) {
+          toggleApproval(idx);
+        }
+      });
+    } else {
+      targetList.forEach((idx) => {
+        if (!selected.includes(idx)) {
+          toggleApproval(idx);
+        }
+      });
+    }
+  };
 
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[1040px]">
         <div className="flex items-center justify-between border-b border-[#095f5a] bg-[#0e776f] px-5 py-3 text-white">
           <div>
-            <p className="text-xs font-bold">Dynamic report ledger</p>
+            <p className="text-xs font-bold">
+              {isRateCut ? "Rate Cut Purchase & Sale Ledger" : "Dynamic report ledger"}
+            </p>
             <p className="mt-0.5 text-[10px] text-white/65">
-              All uploaded entries managed in one side-by-side ledger
+              {isRateCut
+                ? "Sell entries on Left Pane & Purchase entries on Right Pane with dynamic total calculation"
+                : "All uploaded entries managed in one side-by-side ledger"}
             </p>
           </div>
           <span className="text-[10px] font-semibold text-white/75">
@@ -2405,7 +2671,7 @@ function LedgerTableView({
             amountKey={amountKey}
             numericKeys={primaryNumericKeys}
             selected={selected}
-            toggleApproval={toggleApproval}
+            toggleApproval={handleToggleApproval}
             getRelatedGroupIndices={getRelatedGroupIndices}
             entryColorPalette={entryColorPalette}
             onDeleteRow={onDeleteRow}
@@ -2425,7 +2691,7 @@ function LedgerTableView({
             amountKey={amountKey}
             numericKeys={primaryNumericKeys}
             selected={selected}
-            toggleApproval={toggleApproval}
+            toggleApproval={handleToggleApproval}
             getRelatedGroupIndices={getRelatedGroupIndices}
             entryColorPalette={entryColorPalette}
             onDeleteRow={onDeleteRow}
@@ -2485,21 +2751,21 @@ function LedgerTableView({
             </div>
           </div>
 
-          {/* Row 2: Total Receipt / Total Issue */}
+          {/* Row 2: Total Sale / Total Purchase */}
           <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
-            {/* Left Side: Total Receipt */}
+            {/* Left Side: Total Sale */}
             <div className="grid grid-cols-4 items-center bg-[#e1f1ed] px-3 py-2.5">
               <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#0e5c56] pr-2">
-                Total Receipt
+                {isRateCut ? "Total Sale" : "Total Receipt"}
               </div>
               <div className="text-right font-black text-[#083c38] font-mono text-[13px] pr-2">
                 {formatNum(totalReceipt, isWeight)}
               </div>
             </div>
-            {/* Right Side: Total Issue */}
+            {/* Right Side: Total Purchase */}
             <div className="grid grid-cols-4 items-center bg-[#f3e3d9] px-3 py-2.5">
               <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#7e432d] pr-2">
-                Total Issue
+                {isRateCut ? "Total Purchase" : "Total Issue"}
               </div>
               <div className="text-right font-black text-[#522919] font-mono text-[13px] pr-2">
                 {formatNum(totalIssue, isWeight)}
@@ -2507,16 +2773,66 @@ function LedgerTableView({
             </div>
           </div>
 
-          {/* Row 3: Closing Balance */}
+          {/* Row 3: Average Sale Rate / Average Purchase Rate */}
+          {isRateCut && (
+            <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
+              {/* Left Side: Average Sale Rate */}
+              <div className="grid grid-cols-4 items-center bg-[#e8f5f2] px-3 py-2 text-slate-700">
+                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#0e5c56] pr-2">
+                  Average Sale Rate
+                </div>
+                <div className="text-right font-black text-[#083c38] font-mono text-[13px] pr-2">
+                  {formatNum(saleAvgRate, false)}
+                </div>
+              </div>
+              {/* Right Side: Average Purchase Rate */}
+              <div className="grid grid-cols-4 items-center bg-[#f8eee7] px-3 py-2 text-slate-700">
+                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#7e432d] pr-2">
+                  Average Purchase Rate
+                </div>
+                <div className="text-right font-black text-[#522919] font-mono text-[13px] pr-2">
+                  {formatNum(purchAvgRate, false)}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Additional Rate Cut metric breakdown rows (e.g. Net Weight) */}
+          {isRateCut && rateCutMetrics.length > 0 && (
+            <div className="divide-y divide-slate-200 border-b border-[#c8b3a7]/60 bg-slate-100/70 text-[11.5px]">
+              {rateCutMetrics.map((m) => (
+                <div key={m.colKey} className="grid grid-cols-2 divide-x divide-[#c8b3a7]">
+                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#edf6f4]">
+                    <span className="font-semibold text-teal-800">
+                      Total Sale ({m.colKey}):
+                    </span>
+                    <span className="font-extrabold font-mono text-teal-950">
+                      {formatNum(m.leftTotal, m.isWt)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#f6ece6]">
+                    <span className="font-semibold text-amber-800">
+                      Total Purchase ({m.colKey}):
+                    </span>
+                    <span className="font-extrabold font-mono text-amber-950">
+                      {formatNum(m.rightTotal, m.isWt)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Row 3: Closing Balance / Rate Cut Net Balance */}
           <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] bg-[#18476A] text-white">
             <div className="flex items-center justify-between px-4 py-2 bg-[#0f344f]">
               <span className="text-[10.5px] font-semibold text-teal-200/90 uppercase tracking-widest">
-                Ledger Balance Summary
+                {isRateCut ? "Rate Cut Summary Balance" : "Ledger Balance Summary"}
               </span>
             </div>
             <div className="grid grid-cols-4 items-center bg-[#18476A] px-3 py-2.5">
               <div className="col-span-3 text-right font-black uppercase tracking-wider text-[11.5px] text-amber-300 pr-2">
-                Closing Balance
+                {isRateCut ? "Rate Cut Net Balance" : "Closing Balance"}
               </div>
               <div className="text-right font-black font-mono text-[14px] text-white pr-2">
                 {formatNum(closingBalance, isWeight)}
@@ -2901,8 +3217,43 @@ function SingleReportCard({
     purityColIndex,
   ]);
 
+  const isRateCutCard = useMemo(() => {
+    const nameStr = (fileName || report.name || "").toLowerCase();
+    const metaType = (report.type || "").toLowerCase();
+    const cleanName = (str: string) => str.replace(/[^a-z0-9]/g, "");
+
+    if (
+      cleanName(nameStr).includes("ratecut") ||
+      cleanName(nameStr).includes("ratcut") ||
+      cleanName(metaType).includes("ratecut") ||
+      cleanName(metaType).includes("ratcut")
+    ) {
+      return true;
+    }
+
+    return (
+      columns.some((c) => /rate\s*cut|rat\s*cut/i.test(c)) ||
+      rows.some((r) => {
+        const val = String(
+          r["Book Name"] || r["BookHeadName"] || r["Type"] || r["Category"] || r["P.Type"] || "",
+        ).toLowerCase();
+        if (
+          val.includes("rate cut") ||
+          val.includes("ratecut") ||
+          val.includes("rat cut")
+        ) {
+          return true;
+        }
+        return Object.values(r).some((v) =>
+          /rate\s*cut|rat\s*cut|purchase\s*rate|sale\s*rate/i.test(String(v)),
+        );
+      })
+    );
+  }, [fileName, report, columns, rows]);
+
   const hasCreditDebitEntries = useMemo(() => {
     if (!rows.length) return false;
+    if (isRateCutCard) return true;
 
     const explicitEntryTypeColumn = columns.find((column) =>
       /^type$|^p\.?type$|^dr\.?\/?cr$|category|nature|inout/i.test(
@@ -2934,7 +3285,7 @@ function SingleReportCard({
     }
 
     return false;
-  }, [rows, columns, activeHeaderStructure]);
+  }, [rows, columns, activeHeaderStructure, isRateCutCard]);
 
   const effectiveViewMode =
     viewMode === "auto"
@@ -3305,6 +3656,9 @@ function SingleReportCard({
                 rowGroupMeta={rowGroupMeta}
                 entryColorPalette={entryColorPalette}
                 canDelete={false}
+                fileName={fileName}
+                reportName={report.name}
+                reportType={report.type}
               />
             </div>
           )}
