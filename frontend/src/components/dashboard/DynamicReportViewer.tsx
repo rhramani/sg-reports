@@ -1265,9 +1265,19 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
     }
   });
 
-  const hasCreditDebitCols = headers.some((h) =>
-    /debit|credit|dr|cr|receipt|issue|inout|p\.?type/i.test(h),
-  );
+  const hasReceiveReturn =
+    mainHeaders.some((g) =>
+      /receive|return|receipt|issue|plus|minus|metal transfer|material customer/i.test(
+        g.title,
+      ),
+    ) ||
+    headers.some((h) =>
+      /debit|credit|dr|cr|receipt|receive|return|issue|inout|plus|minus|p\.?type/i.test(
+        h,
+      ),
+    );
+
+  const hasCreditDebitCols = hasReceiveReturn;
   const isMeltingReport = false;
 
   let layoutMode: "ledger" | "melting" | "grid" = "grid";
@@ -1280,7 +1290,9 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
   const detectedReportType = isMeltingReport
     ? "Metal Melting / In-Out Balance Report"
     : hasCreditDebitCols
-      ? "Credit / Debit Financial Ledger"
+      ? isMultiLevel
+        ? "Metal Journal Receive / Return Ledger"
+        : "Credit / Debit Financial Ledger"
       : isMultiLevel
         ? `Multi-Level Table (${headerLevels.length + 1} Header Tiers)`
         : "Standard Tabular Spreadsheet";
@@ -1317,11 +1329,139 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
   };
 }
 
-interface LedgerPaneRow {
+export interface LedgerPaneRow {
   row: Record<string, any>;
   index: number;
   group: string;
   groupId: number;
+  isPlaceholder?: boolean;
+  matchedPairId?: string;
+  matchedWeight?: number;
+}
+
+export function pairAndAlignLedgerEntries(
+  debit: LedgerPaneRow[],
+  credit: LedgerPaneRow[],
+): {
+  alignedDebit: LedgerPaneRow[];
+  alignedCredit: LedgerPaneRow[];
+  matchedCount: number;
+} {
+  const parseAmt = (val: any) => {
+    if (!val) return 0;
+    const num = parseFloat(String(val).replace(/[^0-9.-]+/g, ""));
+    return isNaN(num) ? 0 : num;
+  };
+
+  const getWeightOrAmount = (rowObj: Record<string, any>) => {
+    let netWt = 0;
+    let pureWt = 0;
+    let amt = 0;
+    for (const k of Object.keys(rowObj || {})) {
+      if (/_|isModified|_isNewEntry|_diff/.test(k)) continue;
+      const v = parseAmt(rowObj[k]);
+      if (v <= 0) continue;
+      if (/net\s*wt|net\s*weight/i.test(k) && netWt === 0) netWt = v;
+      if (/pure\s*wt|pure\s*weight|fine/i.test(k) && pureWt === 0) pureWt = v;
+      if (/^amt$|^amount$/i.test(k) && amt === 0) amt = v;
+    }
+    if (netWt === 0) netWt = parseAmt(rowObj["Net Weight"] ?? rowObj["Net Weight (2)"]);
+    if (pureWt === 0) pureWt = parseAmt(rowObj["Pure Weight"] ?? rowObj["Pure Weight (2)"]);
+    if (amt === 0) amt = parseAmt(rowObj["Amount"] ?? rowObj["Amount (2)"] ?? rowObj["Amt."]);
+
+    return { netWt, pureWt, amt };
+  };
+
+  const usedCreditIndices = new Set<number>();
+  const alignedDebit: LedgerPaneRow[] = [];
+  const alignedCredit: LedgerPaneRow[] = [];
+  let matchedCount = 0;
+
+  debit.forEach((d, dIdx) => {
+    alignedDebit.push(d);
+
+    if (!d.row || d.isPlaceholder) {
+      alignedCredit.push({
+        row: {},
+        index: -1000 - dIdx,
+        group: "",
+        groupId: -1000 - dIdx,
+        isPlaceholder: true,
+      });
+      return;
+    }
+
+    const dVals = getWeightOrAmount(d.row);
+    const targetWt =
+      dVals.netWt > 0 ? dVals.netWt : dVals.pureWt > 0 ? dVals.pureWt : dVals.amt;
+
+    let matchedCreditIdx = -1;
+    if (targetWt > 0) {
+      for (let cIdx = 0; cIdx < credit.length; cIdx++) {
+        if (usedCreditIndices.has(cIdx)) continue;
+        const c = credit[cIdx];
+        if (!c.row || c.isPlaceholder) continue;
+
+        const cVals = getWeightOrAmount(c.row);
+
+        const isNetMatch =
+          dVals.netWt > 0 && cVals.netWt > 0 && Math.abs(dVals.netWt - cVals.netWt) < 0.0005;
+        const isPureMatch =
+          dVals.pureWt > 0 && cVals.pureWt > 0 && Math.abs(dVals.pureWt - cVals.pureWt) < 0.0005;
+        const isAmtMatch =
+          dVals.amt > 0 && cVals.amt > 0 && Math.abs(dVals.amt - cVals.amt) < 0.005;
+
+        if (
+          (isNetMatch && (dVals.pureWt === 0 || cVals.pureWt === 0 || isPureMatch)) ||
+          (dVals.netWt === 0 && isPureMatch) ||
+          (dVals.netWt === 0 && dVals.pureWt === 0 && isAmtMatch)
+        ) {
+          matchedCreditIdx = cIdx;
+          break;
+        }
+      }
+    }
+
+    if (matchedCreditIdx !== -1) {
+      usedCreditIndices.add(matchedCreditIdx);
+      matchedCount++;
+      const pairId = `pair-${matchedCount}`;
+      const matchedCreditRow = {
+        ...credit[matchedCreditIdx],
+        matchedPairId: pairId,
+        matchedWeight: targetWt,
+      };
+      alignedDebit[alignedDebit.length - 1] = {
+        ...d,
+        matchedPairId: pairId,
+        matchedWeight: targetWt,
+      };
+      alignedCredit.push(matchedCreditRow);
+    } else {
+      alignedCredit.push({
+        row: {},
+        index: -1000 - dIdx,
+        group: "",
+        groupId: -1000 - dIdx,
+        isPlaceholder: true,
+      });
+    }
+  });
+
+  credit.forEach((c, cIdx) => {
+    if (usedCreditIndices.has(cIdx) || c.isPlaceholder) return;
+
+    alignedDebit.push({
+      row: {},
+      index: -2000 - cIdx,
+      group: "",
+      groupId: -2000 - cIdx,
+      isPlaceholder: true,
+    });
+    alignedCredit.push(c);
+  });
+
+  return { alignedDebit, alignedCredit, matchedCount };
 }
 
 interface LedgerPaneProps {
@@ -1339,6 +1479,10 @@ interface LedgerPaneProps {
   entryColorPalette?: EntryColorPaletteKey;
   onDeleteRow?: (index: number) => void;
   canDelete?: boolean;
+  hoveredPairId?: string | null;
+  onHoverPair?: (pairId: string | null) => void;
+  scrollRef?: React.Ref<HTMLDivElement>;
+  onScroll?: React.UIEventHandler<HTMLDivElement>;
 }
 
 interface LedgerRenderItem {
@@ -1349,6 +1493,9 @@ interface LedgerRenderItem {
   groupId: number;
   bandIndex: number;
   isNewEntryStart: boolean;
+  isPlaceholder?: boolean;
+  matchedPairId?: string;
+  matchedWeight?: number;
 }
 
 function LedgerPane({
@@ -1366,6 +1513,10 @@ function LedgerPane({
   entryColorPalette = "classic",
   onDeleteRow,
   canDelete = false,
+  hoveredPairId,
+  onHoverPair,
+  scrollRef,
+  onScroll,
 }: LedgerPaneProps) {
   const isDebit = tone === "debit";
 
@@ -1387,10 +1538,10 @@ function LedgerPane({
       maximumFractionDigits: 3,
     });
 
-  const toneText = isDebit ? "text-[#8f5039]" : "text-[#126c65]";
+  const toneText = isDebit ? "text-[#126c65]" : "text-[#8f5039]";
   const toneHeaderBorder = isDebit
-    ? "border-[#d9c2b5] bg-[#ead8ce]"
-    : "border-[#b9d0cc] bg-[#dcece9]";
+    ? "border-[#b9d0cc] bg-[#dcece9]"
+    : "border-[#d9c2b5] bg-[#ead8ce]";
 
   const paneGrandTotal: Record<string, number> = {};
   numericKeys.forEach((nk) => (paneGrandTotal[nk] = 0));
@@ -1399,44 +1550,72 @@ function LedgerPane({
   let i = 0;
   let bandIndex = -1;
   while (i < rows.length) {
-    const groupId = rows[i].groupId;
+    const itemRow = rows[i];
+    if (itemRow.isPlaceholder) {
+      renderItems.push({
+        kind: "row",
+        row: {},
+        index: itemRow.index,
+        group: "",
+        groupId: itemRow.groupId,
+        bandIndex: 0,
+        isNewEntryStart: false,
+        isPlaceholder: true,
+      });
+      i++;
+      continue;
+    }
+    const groupId = itemRow.groupId;
     bandIndex++;
     const groupRows: LedgerPaneRow[] = [];
-    while (i < rows.length && rows[i].groupId === groupId) {
+    while (
+      i < rows.length &&
+      !rows[i].isPlaceholder &&
+      rows[i].groupId === groupId
+    ) {
       groupRows.push(rows[i]);
       i++;
     }
-    groupRows.forEach(({ row, index, group }, gi) => {
-      renderItems.push({
-        kind: "row",
-        row,
-        index,
-        group,
-        groupId,
-        bandIndex,
-        isNewEntryStart: gi === 0,
-      });
-      numericKeys.forEach((nk) => {
-        paneGrandTotal[nk] += parseAmt(row[nk]);
-      });
-    });
+    groupRows.forEach(
+      ({ row, index, group, matchedPairId, matchedWeight }, gi) => {
+        renderItems.push({
+          kind: "row",
+          row,
+          index,
+          group,
+          groupId,
+          bandIndex,
+          isNewEntryStart: gi === 0,
+          matchedPairId,
+          matchedWeight,
+        });
+        numericKeys.forEach((nk) => {
+          paneGrandTotal[nk] += parseAmt(row[nk]);
+        });
+      },
+    );
   }
+
+  const activeRows = useMemo(
+    () => rows.filter((r) => !r.isPlaceholder),
+    [rows],
+  );
 
   const activeNumericKeys = useMemo(() => {
     const active = numericKeys.filter((nk) => {
-      if (rows.length > 0) {
-        const allZero = rows.every((r) => parseAmt(r.row[nk]) === 0);
+      if (activeRows.length > 0) {
+        const allZero = activeRows.every((r) => parseAmt(r.row[nk]) === 0);
         if (allZero) return false;
       }
       return true;
     });
     return active.length > 0 ? active : numericKeys;
-  }, [numericKeys, rows]);
+  }, [numericKeys, activeRows]);
 
   return (
     <div
       className={`min-w-[420px] flex-1 ${
-        isDebit ? "bg-[#faf5f2]" : "border-r border-[#c8b3a7] bg-[#f3f8f7]"
+        isDebit ? "bg-[#f3f8f7]" : "border-r border-[#c8b3a7] bg-[#faf5f2]"
       }`}
     >
       <div
@@ -1450,18 +1629,22 @@ function LedgerPane({
         <span
           className={`rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold ${toneText}`}
         >
-          {rows.length} entries
+          {activeRows.length} entries
         </span>
       </div>
 
       {/* Scrollable DataTable-style body — sticky header + sticky checkbox
           column, matching the Standard Tabular Grid View. */}
-      <div className="max-h-[560px] overflow-auto">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="max-h-[560px] overflow-auto"
+      >
         <table className="w-full min-w-full border-separate border-spacing-0 text-left">
           <thead className="sticky top-0 z-20">
             <tr className="bg-[#18476A] text-[10.5px] font-bold uppercase tracking-[0.08em] text-white">
               {(() => {
-                const paneIndices = rows.map((r) => r.index);
+                const paneIndices = activeRows.map((r) => r.index);
                 const isAllPaneSelected =
                   paneIndices.length > 0 &&
                   paneIndices.every((idx) => selected.includes(idx));
@@ -1514,29 +1697,74 @@ function LedgerPane({
                   </th>
                 );
               })()}
-              {textColumns.map((column) => (
-                <th
-                  key={column}
-                  className="border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 whitespace-nowrap align-middle"
-                >
-                  {column}
-                </th>
-              ))}
-              {activeNumericKeys.map((nk) => (
-                <th
-                  key={nk}
-                  className="border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 text-right whitespace-nowrap align-middle"
-                >
-                  {nk}
-                </th>
-              ))}
+              {textColumns.map((column) => {
+                const colLabel = column.replace(/\s*\(\d+\)$/, "");
+                return (
+                  <th
+                    key={column}
+                    className="border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 whitespace-nowrap align-middle"
+                  >
+                    {colLabel}
+                  </th>
+                );
+              })}
+              {activeNumericKeys.map((nk) => {
+                const colLabel = nk.replace(/\s*\(\d+\)$/, "");
+                return (
+                  <th
+                    key={nk}
+                    className="border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 text-right whitespace-nowrap align-middle"
+                  >
+                    {colLabel}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {renderItems.map((item) => {
-              const { row, index, group, groupId, bandIndex, isNewEntryStart } =
-                item;
+              if (item.isPlaceholder) {
+                return (
+                  <tr
+                    key={`placeholder-${item.index}`}
+                    className="h-[41px] bg-slate-50/40 border-t border-slate-200/80 border-b border-slate-200/60"
+                  >
+                    <td className="sticky left-0 bg-inherit px-3.5 py-2.5 align-middle whitespace-nowrap text-center text-slate-300">
+                      <div className="flex items-center justify-center h-4 text-slate-300 select-none text-xs font-mono">—</div>
+                    </td>
+                    {textColumns.map((col) => (
+                      <td
+                        key={col}
+                        className="whitespace-nowrap px-3.5 py-2.5 align-middle text-xs text-slate-300 select-none font-mono"
+                      >
+                        —
+                      </td>
+                    ))}
+                    {activeNumericKeys.map((nk) => (
+                      <td
+                        key={nk}
+                        className="whitespace-nowrap px-3.5 py-2.5 text-right align-middle text-xs text-slate-300 select-none font-mono"
+                      >
+                        —
+                      </td>
+                    ))}
+                  </tr>
+                );
+              }
+
+              const {
+                row,
+                index,
+                group,
+                groupId,
+                bandIndex,
+                isNewEntryStart,
+                matchedPairId,
+                matchedWeight,
+              } = item;
               const isRowApproved = selected.includes(index);
+              const isPairHovered =
+                Boolean(matchedPairId) && matchedPairId === hoveredPairId;
 
               const band = getEntryBandStyle(bandIndex, entryColorPalette);
               const user = getAuthUser();
@@ -1549,89 +1777,102 @@ function LedgerPane({
               return (
                 <tr
                   key={`${group}-${index}`}
-                  className={`transition-colors duration-150 ${
-                    isRowApproved
-                      ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
-                      : isRowModified
-                        ? "bg-amber-50/90 hover:bg-amber-100/90 border-l-4 border-l-amber-500 shadow-2xs"
-                        : isNewRowEntry
-                          ? "bg-emerald-50/80 hover:bg-emerald-100/80 border-l-4 border-l-emerald-500"
-                          : `${band.base} ${band.hover}`
+                  onMouseEnter={() => {
+                    if (matchedPairId) onHoverPair?.(matchedPairId);
+                  }}
+                  onMouseLeave={() => {
+                    if (matchedPairId) onHoverPair?.(null);
+                  }}
+                  className={`h-[41px] transition-all duration-150 ${
+                    isPairHovered
+                      ? "bg-emerald-100/90 ring-2 ring-emerald-500/80 shadow-md z-10"
+                      : isRowApproved
+                        ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
+                        : isRowModified
+                          ? "bg-amber-50/90 hover:bg-amber-100/90 border-l-4 border-l-amber-500 shadow-2xs"
+                          : isNewRowEntry
+                            ? "bg-emerald-50/80 hover:bg-emerald-100/80 border-l-4 border-l-emerald-500"
+                            : `${band.base} ${band.hover}`
                   } ${
                     isNewEntryStart
-                      ? "border-t-2 border-slate-300/80"
-                      : "border-t border-slate-100"
-                  } border-b border-slate-100`}
+                      ? "border-t border-slate-300/90"
+                      : "border-t border-slate-200/80"
+                  } border-b border-slate-200/60`}
                 >
                   <td
-                    className={`sticky left-0 bg-inherit px-3.5 py-2.5 align-top whitespace-nowrap ${
+                    className={`sticky left-0 bg-inherit px-3.5 py-2.5 align-middle whitespace-nowrap ${
                       !isRowApproved && entryColorPalette !== "none"
                         ? band.border
                         : ""
                     }`}
                   >
-                    <div className="flex flex-col items-start gap-1 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap h-4">
+                      <button
+                        type="button"
+                        onClick={() => toggleApproval(index)}
+                        title={
+                          isRowApproved
+                            ? `Row #${index + 1} Selected - click to deselect`
+                            : `Select Row #${index + 1}`
+                        }
+                        className={`grid h-4 w-4 place-items-center rounded border transition ${
+                          isRowApproved
+                            ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
+                            : "border-slate-400 bg-white text-transparent hover:border-slate-600"
+                        }`}
+                      >
+                        {isRowApproved ? (
+                          <Check size={12} strokeWidth={3} />
+                        ) : (
+                          <Check size={12} strokeWidth={3} />
+                        )}
+                      </button>
+                      {isNewEntryStart && canDelete && onDeleteRow && (
                         <button
                           type="button"
-                          onClick={() => toggleApproval(index)}
-                          title={
-                            isRowApproved
-                              ? `Row #${index + 1} Selected - click to deselect`
-                              : `Select Row #${index + 1}`
-                          }
-                          className={`grid h-4 w-4 place-items-center rounded border transition ${
-                            isRowApproved
-                              ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
-                              : "border-slate-400 bg-white text-transparent hover:border-slate-600"
-                          }`}
+                          onClick={() => onDeleteRow(index)}
+                          className="p-0.5 text-slate-400 hover:text-rose-600 transition rounded hover:bg-rose-50"
+                          title="Delete entry"
                         >
-                          {isRowApproved ? (
-                            <Check size={12} strokeWidth={3} />
-                          ) : (
-                            <Check size={12} strokeWidth={3} />
-                          )}
+                          <Trash2 size={13} />
                         </button>
-                        {isNewEntryStart && canDelete && onDeleteRow && (
-                          <button
-                            type="button"
-                            onClick={() => onDeleteRow(index)}
-                            className="p-0.5 text-slate-400 hover:text-rose-600 transition rounded hover:bg-rose-50"
-                            title="Delete entry"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                      </div>
+                      )}
                       {isRowApproved && (
                         <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
                           By - {currentUserName}
                         </span>
                       )}
                       {isNewEntryStart && isRowModified && (
-                        <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
+                        <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs">
                           <RefreshCw size={9} className="text-amber-700 animate-spin-slow" /> Modified
                         </span>
                       )}
                       {isNewEntryStart && isNewRowEntry && (
-                        <span className="inline-flex items-center gap-1 rounded bg-emerald-100/90 border border-emerald-300 px-1 py-0.5 text-[9px] font-bold text-emerald-900 whitespace-nowrap shadow-2xs mt-0.5">
+                        <span className="inline-flex items-center gap-1 rounded bg-emerald-100/90 border border-emerald-300 px-1 py-0.5 text-[9px] font-bold text-emerald-900 whitespace-nowrap shadow-2xs">
                           <Sparkles size={9} className="text-emerald-700" /> New Entry
                         </span>
                       )}
                     </div>
                   </td>
                   {textColumns.map((column) => {
+                    const rawVal =
+                      row[column] !== undefined && row[column] !== ""
+                        ? row[column]
+                        : row[`${column} (2)`] !== undefined &&
+                            row[`${column} (2)`] !== ""
+                          ? row[`${column} (2)`]
+                          : "";
                     const valNode =
                       column === transactionKey
-                        ? row[column] || group || "—"
-                        : row[column] || "—";
+                        ? rawVal || group || "—"
+                        : rawVal || "—";
                     const fieldDiff = (row._diff as Record<string, { old: unknown; new: unknown }> | undefined)?.[column];
 
                     if (fieldDiff) {
                       return (
                         <td
                           key={column}
-                          className="whitespace-nowrap px-3 py-2 align-top text-xs font-medium bg-amber-100/40 text-slate-900"
+                          className="whitespace-nowrap px-3 py-2 align-middle text-xs font-medium bg-amber-100/40 text-slate-900"
                         >
                           <div className="group relative inline-flex items-center gap-1.5 justify-start w-full">
                             <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-bold text-amber-950 border border-amber-300 shadow-2xs">
@@ -1669,21 +1910,27 @@ function LedgerPane({
                     return (
                       <td
                         key={column}
-                        className="whitespace-nowrap px-3.5 py-2.5 align-top text-xs font-medium text-slate-700"
+                        className="whitespace-nowrap px-3.5 py-2.5 align-middle text-xs font-medium text-slate-700"
                       >
                         {valNode}
                       </td>
                     );
                   })}
                   {activeNumericKeys.map((nk) => {
-                    const valNode = row[nk] || "—";
+                    const rawVal =
+                      row[nk] !== undefined && row[nk] !== ""
+                        ? row[nk]
+                        : row[`${nk} (2)`] !== undefined && row[`${nk} (2)`] !== ""
+                          ? row[`${nk} (2)`]
+                          : "";
+                    const valNode = rawVal !== "" ? rawVal : "—";
                     const fieldDiff = (row._diff as Record<string, { old: unknown; new: unknown }> | undefined)?.[nk];
 
                     if (fieldDiff) {
                       return (
                         <td
                           key={nk}
-                          className="whitespace-nowrap px-3 py-2 text-right align-top text-xs font-bold bg-amber-100/40 text-amber-950"
+                          className="whitespace-nowrap px-3 py-2 text-right align-middle text-xs font-bold bg-amber-100/40 text-amber-950"
                         >
                           <div className="group relative inline-flex items-center gap-1.5 justify-end w-full">
                             <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-mono font-bold text-amber-950 border border-amber-300 shadow-2xs">
@@ -1721,7 +1968,7 @@ function LedgerPane({
                     return (
                       <td
                         key={nk}
-                        className={`whitespace-nowrap px-3.5 py-2.5 text-right align-top text-xs font-bold ${toneText}`}
+                        className="whitespace-nowrap px-3.5 py-2.5 text-right align-middle text-xs font-medium text-slate-700 font-mono"
                       >
                         {valNode}
                       </td>
@@ -1852,6 +2099,27 @@ function LedgerTableView({
   const entries = allEntries.filter((e) => !e.isTotalRow);
 
   const debit = entries.filter(({ row }) => {
+    const bookName = String(
+      row["Book Name"] || row["BookHeadName"] || "",
+    ).toLowerCase();
+    if (/receive|receipt|mtr|plus/i.test(bookName)) return true;
+
+    const netWtRec = parseAmt(row["Net Weight"]);
+    const pureWtRec = parseAmt(row["Pure Weight"]);
+    const amtRec = parseAmt(row["Amount"]);
+    const netWtRet = parseAmt(row["Net Weight (2)"]);
+    const pureWtRet = parseAmt(row["Pure Weight (2)"]);
+    const amtRet = parseAmt(row["Amount (2)"]);
+
+    if (
+      (netWtRec > 0 || pureWtRec > 0 || amtRec > 0) &&
+      netWtRet === 0 &&
+      pureWtRet === 0 &&
+      amtRet === 0
+    ) {
+      return true;
+    }
+
     if (
       debitCol &&
       parseAmt(row[debitCol]) > 0 &&
@@ -1891,6 +2159,27 @@ function LedgerTableView({
   });
 
   const credit = entries.filter(({ row }) => {
+    const bookName = String(
+      row["Book Name"] || row["BookHeadName"] || "",
+    ).toLowerCase();
+    if (/issue|return|mti|minus/i.test(bookName)) return true;
+
+    const netWtRec = parseAmt(row["Net Weight"]);
+    const pureWtRec = parseAmt(row["Pure Weight"]);
+    const amtRec = parseAmt(row["Amount"]);
+    const netWtRet = parseAmt(row["Net Weight (2)"]);
+    const pureWtRet = parseAmt(row["Pure Weight (2)"]);
+    const amtRet = parseAmt(row["Amount (2)"]);
+
+    if (
+      (netWtRet > 0 || pureWtRet > 0 || amtRet > 0) &&
+      netWtRec === 0 &&
+      pureWtRec === 0 &&
+      amtRec === 0
+    ) {
+      return true;
+    }
+
     if (
       creditCol &&
       parseAmt(row[creditCol]) > 0 &&
@@ -1947,17 +2236,21 @@ function LedgerTableView({
 
   const primaryKey =
     primaryNumericKeys[primaryNumericKeys.length - 1] || amountKey || "Amt.";
-  const isWeight = /wt|weight|fine/i.test(primaryKey);
+  const isWeight = /wt|weight|fine/i.test(primaryKey) || displayCols.some((c) => /net.*wt|pure.*wt/i.test(c));
 
   let debitVerified = 0;
   let debitUnverified = 0;
   debit.forEach(({ row, index }) => {
     const amt = parseAmt(
-      (debitCol && row[debitCol]) ||
-        row["Debit"] ||
-        row["Dr"] ||
-        row[primaryKey] ||
-        row["Amount"],
+      row["Net Weight"] !== undefined && row["Net Weight"] !== ""
+        ? row["Net Weight"]
+        : row["Pure Weight"] !== undefined && row["Pure Weight"] !== ""
+          ? row["Pure Weight"]
+          : (debitCol && row[debitCol]) ||
+            row["Debit"] ||
+            row["Dr"] ||
+            row[primaryKey] ||
+            row["Amount"],
     );
     if (selected.includes(index)) {
       debitVerified += amt;
@@ -1971,11 +2264,17 @@ function LedgerTableView({
   let creditUnverified = 0;
   credit.forEach(({ row, index }) => {
     const amt = parseAmt(
-      (creditCol && row[creditCol]) ||
-        row["Credit"] ||
-        row["Cr"] ||
-        row[primaryKey] ||
-        row["Amount"],
+      row["Net Weight (2)"] !== undefined && row["Net Weight (2)"] !== ""
+        ? row["Net Weight (2)"]
+        : row["Net Weight"] !== undefined && row["Net Weight"] !== ""
+          ? row["Net Weight"]
+          : row["Pure Weight (2)"] !== undefined && row["Pure Weight (2)"] !== ""
+            ? row["Pure Weight (2)"]
+            : (creditCol && row[creditCol]) ||
+              row["Credit"] ||
+              row["Cr"] ||
+              row[primaryKey] ||
+              row["Amount"],
     );
     if (selected.includes(index)) {
       creditVerified += amt;
@@ -1990,11 +2289,15 @@ function LedgerTableView({
     return (
       sum +
       parseAmt(
-        (debitCol && row[debitCol]) ||
-          row["Debit"] ||
-          row["Dr"] ||
-          row[primaryKey] ||
-          row["Amount"],
+        row["Net Weight"] !== undefined && row["Net Weight"] !== ""
+          ? row["Net Weight"]
+          : row["Pure Weight"] !== undefined && row["Pure Weight"] !== ""
+            ? row["Pure Weight"]
+            : (debitCol && row[debitCol]) ||
+              row["Debit"] ||
+              row["Dr"] ||
+              row[primaryKey] ||
+              row["Amount"],
       )
     );
   }, 0);
@@ -2004,11 +2307,17 @@ function LedgerTableView({
     return (
       sum +
       parseAmt(
-        (creditCol && row[creditCol]) ||
-          row["Credit"] ||
-          row["Cr"] ||
-          row[primaryKey] ||
-          row["Amount"],
+        row["Net Weight (2)"] !== undefined && row["Net Weight (2)"] !== ""
+          ? row["Net Weight (2)"]
+          : row["Net Weight"] !== undefined && row["Net Weight"] !== ""
+            ? row["Net Weight"]
+            : row["Pure Weight (2)"] !== undefined && row["Pure Weight (2)"] !== ""
+              ? row["Pure Weight (2)"]
+              : (creditCol && row[creditCol]) ||
+                row["Credit"] ||
+                row["Cr"] ||
+                row[primaryKey] ||
+                row["Amount"],
       )
     );
   }, 0);
@@ -2016,6 +2325,58 @@ function LedgerTableView({
   const totalReceipt = txnDebitTotal > 0 ? txnDebitTotal : debitSubTotal;
   const totalIssue = txnCreditTotal > 0 ? txnCreditTotal : creditSubTotal;
   const closingBalance = debitSubTotal - creditSubTotal;
+
+  const isMetalJournal =
+    displayCols.some((c) => /net.*wt|pure.*wt/i.test(c)) ||
+    displayCols.some((c) => /\(\d+\)$/.test(c)) ||
+    rows.some((r) =>
+      /metal transfer|material customer/i.test(
+        String(r["Book Name"] || r["BookHeadName"] || ""),
+      ),
+    );
+
+  const [hoveredPairId, setHoveredPairId] = useState<string | null>(null);
+
+  const leftScrollRef = useRef<HTMLDivElement>(null);
+  const rightScrollRef = useRef<HTMLDivElement>(null);
+  const isSyncingScroll = useRef(false);
+
+  const handleLeftScroll = () => {
+    if (!isMetalJournal || isSyncingScroll.current) return;
+    isSyncingScroll.current = true;
+    if (leftScrollRef.current && rightScrollRef.current) {
+      rightScrollRef.current.scrollTop = leftScrollRef.current.scrollTop;
+    }
+    requestAnimationFrame(() => {
+      isSyncingScroll.current = false;
+    });
+  };
+
+  const handleRightScroll = () => {
+    if (!isMetalJournal || isSyncingScroll.current) return;
+    isSyncingScroll.current = true;
+    if (leftScrollRef.current && rightScrollRef.current) {
+      leftScrollRef.current.scrollTop = rightScrollRef.current.scrollTop;
+    }
+    requestAnimationFrame(() => {
+      isSyncingScroll.current = false;
+    });
+  };
+
+  const { alignedDebit, alignedCredit, matchedCount } = useMemo(() => {
+    if (!isMetalJournal) {
+      return { alignedDebit: debit, alignedCredit: credit, matchedCount: 0 };
+    }
+    return pairAndAlignLedgerEntries(debit, credit);
+  }, [debit, credit, isMetalJournal]);
+
+  const leftPaneTitle = isMetalJournal
+    ? "Material Customer Receive (Plus)"
+    : "Credit entry";
+
+  const rightPaneTitle = isMetalJournal
+    ? "Material Customer Return (Minus)"
+    : "Debit entry";
 
   return (
     <div className="overflow-x-auto">
@@ -2032,12 +2393,12 @@ function LedgerTableView({
           </span>
         </div>
 
-        {/* Side-by-side Ledger Panes */}
+        {/* Side-by-side Ledger Panes: Left = Receive (Plus), Right = Return (Minus) */}
         <div className="grid grid-cols-2">
           <LedgerPane
-            title="Credit report"
-            tone="credit"
-            rows={credit}
+            title={leftPaneTitle}
+            tone="debit"
+            rows={alignedDebit}
             columns={displayCols}
             transactionKey={transactionKey}
             typeKey={typeKey}
@@ -2049,11 +2410,15 @@ function LedgerTableView({
             entryColorPalette={entryColorPalette}
             onDeleteRow={onDeleteRow}
             canDelete={canDelete}
+            hoveredPairId={hoveredPairId}
+            onHoverPair={setHoveredPairId}
+            scrollRef={isMetalJournal ? leftScrollRef : undefined}
+            onScroll={isMetalJournal ? handleLeftScroll : undefined}
           />
           <LedgerPane
-            title="Debit report"
-            tone="debit"
-            rows={debit}
+            title={rightPaneTitle}
+            tone="credit"
+            rows={alignedCredit}
             columns={displayCols}
             transactionKey={transactionKey}
             typeKey={typeKey}
@@ -2065,6 +2430,10 @@ function LedgerTableView({
             entryColorPalette={entryColorPalette}
             onDeleteRow={onDeleteRow}
             canDelete={canDelete}
+            hoveredPairId={hoveredPairId}
+            onHoverPair={setHoveredPairId}
+            scrollRef={isMetalJournal ? rightScrollRef : undefined}
+            onScroll={isMetalJournal ? handleRightScroll : undefined}
           />
         </div>
 
@@ -2072,32 +2441,11 @@ function LedgerTableView({
         <div className="border-t-2 border-[#18476A] bg-[#f8fafc] text-xs font-sans shadow-xs">
           {/* Row 1: Verify / Unverify / Sub Total */}
           <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
-            {/* Credit Side (left) */}
+            {/* Left Side: Receive (Plus) */}
             <div className="grid grid-cols-4 items-center bg-[#edf6f4] px-3 py-2 text-slate-700">
               <div className="text-center font-medium">
                 Verify :{" "}
                 <span className="font-bold text-[#126c65]">
-                  {formatNum(creditVerified, isWeight)}
-                </span>
-              </div>
-              <div className="text-center font-medium">
-                Unverify :{" "}
-                <span className="font-bold text-[#18476A]">
-                  {formatNum(creditUnverified, isWeight)}
-                </span>
-              </div>
-              <div className="text-right font-bold text-[#0f524d] pr-2">
-                Sub Total
-              </div>
-              <div className="text-right font-extrabold text-[#0c4440] font-mono text-[12.5px] pr-2">
-                {formatNum(creditSubTotal, isWeight)}
-              </div>
-            </div>
-            {/* Debit Side (right) */}
-            <div className="grid grid-cols-4 items-center bg-[#f6ece6] px-3 py-2 text-slate-700">
-              <div className="text-center font-medium">
-                Verify :{" "}
-                <span className="font-bold text-[#8f5039]">
                   {formatNum(debitVerified, isWeight)}
                 </span>
               </div>
@@ -2107,33 +2455,54 @@ function LedgerTableView({
                   {formatNum(debitUnverified, isWeight)}
                 </span>
               </div>
+              <div className="text-right font-bold text-[#0f524d] pr-2">
+                Sub Total
+              </div>
+              <div className="text-right font-extrabold text-[#0c4440] font-mono text-[12.5px] pr-2">
+                {formatNum(debitSubTotal, isWeight)}
+              </div>
+            </div>
+            {/* Right Side: Return (Minus) */}
+            <div className="grid grid-cols-4 items-center bg-[#f6ece6] px-3 py-2 text-slate-700">
+              <div className="text-center font-medium">
+                Verify :{" "}
+                <span className="font-bold text-[#8f5039]">
+                  {formatNum(creditVerified, isWeight)}
+                </span>
+              </div>
+              <div className="text-center font-medium">
+                Unverify :{" "}
+                <span className="font-bold text-[#18476A]">
+                  {formatNum(creditUnverified, isWeight)}
+                </span>
+              </div>
               <div className="text-right font-bold text-[#733f2b] pr-2">
                 Sub Total
               </div>
               <div className="text-right font-extrabold text-[#5c3121] font-mono text-[12.5px] pr-2">
-                {formatNum(debitSubTotal, isWeight)}
+                {formatNum(creditSubTotal, isWeight)}
               </div>
             </div>
           </div>
 
-          {/* Row 2: Total Issue / Total Receipt */}
+          {/* Row 2: Total Receipt / Total Issue */}
           <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
-            {/* Credit Side Total Issue (left) */}
+            {/* Left Side: Total Receipt */}
             <div className="grid grid-cols-4 items-center bg-[#e1f1ed] px-3 py-2.5">
               <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#0e5c56] pr-2">
-                Total Issue
-              </div>
-              <div className="text-right font-black text-[#083c38] font-mono text-[13px] pr-2">
-                {formatNum(totalIssue, isWeight)}
-              </div>
-            </div>
-            {/* Debit Side Total Receipt (right) */}
-            <div className="grid grid-cols-4 items-center bg-[#f3e3d9] px-3 py-2.5">
-              <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#7e432d] pr-2">
                 Total Receipt
               </div>
-              <div className="text-right font-black text-[#522919] font-mono text-[13px] pr-2">
+              <div className="text-right font-black text-[#083c38] font-mono text-[13px] pr-2">
                 {formatNum(totalReceipt, isWeight)}
+              </div>
+            </div>
+            {/* Right Side: Total Issue */}
+            <div className="grid grid-cols-4 items-center bg-[#f3e3d9] px-3 py-2.5">
+              <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#7e432d] pr-2">
+                Total Issue
+              </div>
+              <div className="text-right font-black text-[#522919] font-mono text-[13px] pr-2">
+                {formatNum(totalIssue, isWeight)}
               </div>
             </div>
           </div>

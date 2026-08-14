@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { pairAndAlignLedgerEntries } from "../components/dashboard/DynamicReportViewer";
 
 function getExactDayRange(dateInput?: string | Date | null): { dayStart: Date; dayEnd: Date } {
   const d = dateInput ? new Date(dateInput) : new Date();
@@ -119,4 +120,140 @@ describe("Report Day Range & Diff Logic", () => {
     // Previous report data object remains 100% untouched
     expect(previousReportData).toEqual(originalPreviousCopy);
   });
+
+  it("classifies Metal Journal rows into Receive and Return and calculates Net Balance", () => {
+    const rows = [
+      {
+        Party: "AMD GAUTAM JEW",
+        "Book Name": "Metal Transfer Receive",
+        "Transaction No": "MTR/26-27/0009",
+        "Net Weight": 25.39,
+        "Pure Weight": 25.39,
+        Amount: 0.0,
+      },
+      {
+        Party: "AMD GAUTAM JEW",
+        "Book Name": "Metal Transfer Receive",
+        "Transaction No": "MTR/26-27/0024",
+        "Net Weight": 17.76,
+        "Pure Weight": 17.76,
+        Amount: 0.0,
+      },
+      {
+        Party: "BADLO KAUSHIK RAJKOT",
+        "Book Name": "Metal Transfer Issue",
+        "Transaction No": "MTI/26-27/0009",
+        "Net Weight (2)": 29.35,
+        "Pure Weight (2)": 29.35,
+        Amount: 0.0,
+      },
+      {
+        Party: "BADLO KAUSHIK RAJKOT",
+        "Book Name": "Metal Transfer Issue",
+        "Transaction No": "MTI/26-27/0012",
+        "Net Weight (2)": 100.0,
+        "Pure Weight (2)": 100.0,
+        Amount: 0.0,
+      },
+    ];
+
+    const receiveEntries = rows.filter((r) =>
+      /receive|mtr|plus/i.test(r["Book Name"]),
+    );
+    const returnEntries = rows.filter((r) =>
+      /issue|mti|minus/i.test(r["Book Name"]),
+    );
+
+    expect(receiveEntries.length).toBe(2);
+    expect(returnEntries.length).toBe(2);
+
+    const totalReceiveNet = receiveEntries.reduce(
+      (sum, r) => sum + (r["Net Weight"] || 0),
+      0,
+    );
+    const totalReturnNet = returnEntries.reduce(
+      (sum, r) => sum + (r["Net Weight (2)"] || 0),
+      0,
+    );
+
+    expect(totalReceiveNet).toBeCloseTo(43.15, 2);
+    expect(totalReturnNet).toBeCloseTo(129.35, 2);
+
+    const netWeightBalance = totalReceiveNet - totalReturnNet;
+    expect(netWeightBalance).toBeCloseTo(-86.2, 2);
+  });
+
+  it("pairs and aligns Metal Transfer Receive and Issue entries side-by-side by weight", () => {
+    const debit = [
+      {
+        row: {
+          Party: "AMD GAUTAM JEW",
+          "Book Name": "Metal Transfer Receive",
+          "Transaction No": "MTR/26-27/0024",
+          "Net Weight": 17.76,
+          "Pure Weight": 17.76,
+        },
+        index: 0,
+        group: "MTR/26-27/0024",
+        groupId: 0,
+      },
+      {
+        row: {
+          Party: "DIVA CHAIN",
+          "Book Name": "Metal Transfer Receive",
+          "Transaction No": "MTR/26-27/0023",
+          "Net Weight": 0.023,
+          "Pure Weight": 0.023,
+        },
+        index: 1,
+        group: "MTR/26-27/0023",
+        groupId: 1,
+      },
+    ];
+
+    const credit = [
+      {
+        row: {
+          Party: "BADLO KAUSHIK RAJKOT",
+          "Book Name": "Metal Transfer Issue",
+          "Transaction No": "MTI/26-27/0009",
+          "Net Weight (2)": 29.35,
+          "Pure Weight (2)": 29.35,
+        },
+        index: 2,
+        group: "MTI/26-27/0009",
+        groupId: 2,
+      },
+      {
+        row: {
+          Party: "LABHLAXMI CHAIN",
+          "Book Name": "Metal Transfer Issue",
+          "Transaction No": "MTI/26-27/0019",
+          "Net Weight (2)": 17.76,
+          "Pure Weight (2)": 17.76,
+        },
+        index: 3,
+        group: "MTI/26-27/0019",
+        groupId: 3,
+      },
+    ];
+
+    const { alignedDebit, alignedCredit, matchedCount } = pairAndAlignLedgerEntries(debit, credit);
+
+    expect(matchedCount).toBe(1);
+    // Row 0 should have AMD GAUTAM JEW on left and LABHLAXMI CHAIN on right (both 17.760g)
+    expect(alignedDebit[0].row.Party).toBe("AMD GAUTAM JEW");
+    expect(alignedCredit[0].row.Party).toBe("LABHLAXMI CHAIN");
+    expect(alignedDebit[0].matchedPairId).toBeDefined();
+    expect(alignedCredit[0].matchedPairId).toBe(alignedDebit[0].matchedPairId);
+
+    // Row 1 should have DIVA CHAIN on left and placeholder on right
+    expect(alignedDebit[1].row.Party).toBe("DIVA CHAIN");
+    expect(alignedCredit[1].isPlaceholder).toBe(true);
+
+    // Row 2 should have placeholder on left and unmatched BADLO KAUSHIK RAJKOT on right
+    expect(alignedDebit[2].isPlaceholder).toBe(true);
+    expect(alignedCredit[2].row.Party).toBe("BADLO KAUSHIK RAJKOT");
+  });
 });
+
