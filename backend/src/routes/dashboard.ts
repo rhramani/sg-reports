@@ -57,7 +57,11 @@ dashboardRouter.get("/summary", authenticateToken, async (req: AuthRequest, res)
       ? { $and: [queryFilter, roleScope] }
       : queryFilter;
 
-    const reports = await ReportModel.find(finalQuery).sort({ createdAt: -1 });
+    const reports = await ReportModel.find(finalQuery).sort({
+      createdAt: -1,
+      updatedAt: -1,
+      _id: -1,
+    });
     const reportsInPeriod = reports.length;
     const approvedReports = reports.filter((r) => r.status === "Approved").length;
     const pendingReview = reports.filter((r) => r.status === "Pending" || r.status === "Review").length;

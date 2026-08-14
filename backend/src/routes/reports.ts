@@ -339,7 +339,11 @@ reportsRouter.get("/", authenticateToken, async (req: AuthRequest, res) => {
       ? { $and: [queryFilter, roleScope] }
       : queryFilter;
 
-    const reports = await ReportModel.find(finalQuery).sort({ createdAt: -1 });
+    const reports = await ReportModel.find(finalQuery).sort({
+      createdAt: -1,
+      updatedAt: -1,
+      _id: -1,
+    });
 
     res.json({
       success: true,
@@ -673,6 +677,10 @@ reportsRouter.post("/", authenticateToken, async (req: AuthRequest, res) => {
     if (createdAt && typeof createdAt === "string" && createdAt.trim()) {
       const parsed = new Date(createdAt.trim());
       if (!isNaN(parsed.getTime())) {
+        const now = new Date();
+        if (createdAt.trim().length <= 10) {
+          parsed.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+        }
         customCreatedAt = parsed;
       }
     }
@@ -798,7 +806,7 @@ reportsRouter.post("/", authenticateToken, async (req: AuthRequest, res) => {
           { type: { $regex: `^${escapeRegex(cleanName)}$`, $options: "i" } },
         ],
         createdAt: { $lt: dayStart },
-      }).sort({ createdAt: -1 });
+      }).sort({ createdAt: -1, updatedAt: -1, _id: -1 });
 
       if (priorReport && Array.isArray(priorReport.data) && priorReport.data.length > 0) {
         newReportData = computeRowDiffs(

@@ -2160,9 +2160,19 @@ function LedgerTableView({
   );
 }
 
-export function DynamicReportViewer({
-  query,
-  setQuery,
+interface SingleReportCardProps {
+  report: ReportItem;
+  permissions?: PermissionActions;
+  query: string;
+  entryColorPalette: EntryColorPaletteKey;
+  headerLayoutMode: "melting" | "standard";
+  onRequestDelete: (report: ReportItem) => void;
+  toast: (message: string) => void;
+  refreshAllData: () => Promise<void>;
+}
+
+function SingleReportCard({
+  report,
   permissions = {
     view: true,
     add: true,
@@ -2170,277 +2180,41 @@ export function DynamicReportViewer({
     delete: true,
     export: true,
   },
-}: {
-  query: string;
-  setQuery?: (value: string) => void;
-  permissions?: PermissionActions;
-}) {
+  query,
+  entryColorPalette: defaultPalette,
+  headerLayoutMode: defaultHeaderLayout,
+  onRequestDelete,
+  toast,
+  refreshAllData,
+}: SingleReportCardProps) {
   type ReportRow = Record<string, any>;
 
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const [savedReports, setSavedReports] = useState<ReportItem[]>([]);
-  const [loadingReports, setLoadingReports] = useState(false);
-  const [selectedReportId, setSelectedReportId] = useState<string>("");
-
   const [rows, setRows] = useState<ReportRow[]>([]);
-  const [fileName, setFileName] = useState("");
-  const [reportId, setReportId] = useState("");
-  const [activeReportMeta, setActiveReportMeta] = useState<ReportItem | null>(
-    null,
-  );
+  const [activeReportHeaders, setActiveReportHeaders] = useState<string[]>([]);
   const [activeHeaderStructure, setActiveHeaderStructure] =
     useState<HeaderStructure | null>(null);
-  const [activeReportHeaders, setActiveReportHeaders] = useState<string[]>([]);
-
+  const [selected, setSelected] = useState<number[]>([]);
   const [viewMode, setViewMode] = useState<
     "auto" | "ledger" | "grid" | "analytics"
   >("auto");
-  const [entryColorPalette, setEntryColorPalette] =
-    useState<EntryColorPaletteKey>("classic");
-  const [headerLayoutMode, setHeaderLayoutMode] = useState<
-    "melting" | "standard"
-  >("melting");
+  const [entryColorPalette] = useState<EntryColorPaletteKey>(defaultPalette);
+  const [headerLayoutMode] = useState<"melting" | "standard">(
+    defaultHeaderLayout,
+  );
+  const [loadingData, setLoadingData] = useState(false);
 
-  const [filterOptions, setFilterOptions] = useState<{
-    types: string[];
-    owners: string[];
-    statuses: string[];
-  }>({ types: [], owners: [], statuses: [] });
-  const [selectedType, setSelectedType] = useState<string>("");
-  const [selectedOwner, setSelectedOwner] = useState<string>("");
-  const [selectedStatus, setSelectedStatus] = useState<string>("");
-
-  const getTodayDateString = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, "0");
-    const day = String(today.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-
-  const extractReportDate = (rows: Record<string, any>[]): string | null => {
-    if (!rows || !rows.length) return null;
-    const sample = rows.slice(0, 30);
-    const dateCol = Object.keys(sample[0] || {}).find((k) =>
-      /date|dt|time|day/i.test(k.trim()),
-    );
-    if (!dateCol) return null;
-
-    for (const r of sample) {
-      const val = String(r[dateCol] ?? "").trim();
-      if (!val || val === "—" || val === "-") continue;
-
-      const ddmmyyyy = val.match(/^(\d{1,2})[/\-. ](\d{1,2})[/\-. ](\d{4})$/);
-      if (ddmmyyyy) {
-        const [, d, m, y] = ddmmyyyy;
-        return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-      }
-
-      const yyyymmdd = val.match(/^(\d{4})[/\-. ](\d{1,2})[/\-. ](\d{1,2})$/);
-      if (yyyymmdd) {
-        const [, y, m, d] = yyyymmdd;
-        return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-      }
-    }
-
-    return null;
-  };
-
-  const [startDate, setStartDate] = useState<string>(getTodayDateString());
-  const [endDate, setEndDate] = useState<string>(getTodayDateString());
-
-  const [selected, setSelected] = useState<number[]>([]);
-  const [notice, setNotice] = useState("");
-
-  const toast = (message: string) => {
-    setNotice(message);
-    window.setTimeout(() => setNotice(""), 2500);
-  };
-
-  const loadFilterOptions = async (sDate?: string, eDate?: string) => {
-    try {
-      const s = sDate !== undefined ? sDate : startDate;
-      const e = eDate !== undefined ? eDate : endDate;
-      const params = new URLSearchParams();
-      if (s) params.append("startDate", s);
-      if (e) params.append("endDate", e);
-      const queryParams = params.toString() ? `?${params.toString()}` : "";
-
-      const res = await authFetch(`/api/reports/filters/options${queryParams}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.data) {
-          setFilterOptions(data.data);
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to load dynamic filter options:", err);
-    }
-  };
+  const reportId = report._id || report.reportId || "";
+  const fileName = report.name || "Report";
 
   useEffect(() => {
-    loadFilterOptions(startDate, endDate);
-  }, [startDate, endDate]);
-
-  const availableReportTypes = useMemo(() => {
-    const set = new Set<string>();
-    if (Array.isArray(savedReports)) {
-      savedReports.forEach((r) => {
-        if (r.name && r.name.trim()) set.add(r.name.trim());
-        if (r.type && r.type.trim()) set.add(r.type.trim());
-      });
-    }
-    if (filterOptions.types && filterOptions.types.length > 0) {
-      filterOptions.types.forEach((t) => {
-        if (t && t.trim()) set.add(t.trim());
-      });
-    }
-    const list = Array.from(set);
-    const humanTitles = new Set(list.filter((name) => !name.includes("_")));
-    const filteredList = list.filter((name) => {
-      if (name.includes("_")) {
-        const cleanAlpha = name.replace(/[^A-Z0-9]/gi, "").toUpperCase();
-        const hasHumanMatch = Array.from(humanTitles).some(
-          (h) => h.replace(/[^A-Z0-9]/gi, "").toUpperCase() === cleanAlpha,
-        );
-        if (hasHumanMatch) return false;
-      }
-      return true;
-    });
-
-    return filteredList.sort();
-  }, [savedReports, filterOptions.types]);
-
-  const loadSavedReports = async (
-    sDate?: string,
-    eDate?: string,
-    typeVal?: string,
-    ownerVal?: string,
-    statusVal?: string,
-    searchVal?: string,
-  ) => {
-    setLoadingReports(true);
-    try {
-      const s = sDate !== undefined ? sDate : startDate;
-      const e = eDate !== undefined ? eDate : endDate;
-      const t = typeVal !== undefined ? typeVal : selectedType;
-      const o = ownerVal !== undefined ? ownerVal : selectedOwner;
-      const st = statusVal !== undefined ? statusVal : selectedStatus;
-      const q = searchVal !== undefined ? searchVal : query;
-
-      const params = new URLSearchParams();
-      if (s) params.append("startDate", s);
-      if (e) params.append("endDate", e);
-      if (t) params.append("type", t);
-      if (o) params.append("owner", o);
-      if (st) params.append("status", st);
-      if (q && q.trim()) params.append("search", q.trim());
-
-      const queryParams = params.toString() ? `?${params.toString()}` : "";
-
-      const res = await authFetch(`/api/reports${queryParams}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.data)) {
-          setSavedReports(data.data);
-          if (data.data.length > 0) {
-            const matchingReport = data.data.find(
-              (r: ReportItem) => (r._id || r.reportId) === selectedReportId,
-            );
-            selectReport(matchingReport || data.data[0]);
-          } else {
-            setRows([]);
-            setFileName("");
-            setSelectedReportId("");
-            setActiveReportMeta(null);
-            setActiveReportHeaders([]);
-            setActiveHeaderStructure(null);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to load reports:", err);
-    } finally {
-      setLoadingReports(false);
-    }
-  };
-
-  useEffect(() => {
-    loadSavedReports(
-      startDate,
-      endDate,
-      selectedType,
-      selectedOwner,
-      selectedStatus,
-      query,
-    );
-  }, [startDate, endDate, selectedType, selectedOwner, selectedStatus, query]);
-
-  // Listen for navigation from Approvals tab → open specific report
-  useEffect(() => {
-    const handler = async (e: Event) => {
-      const reportId = (e as CustomEvent<{ reportId: string }>).detail?.reportId;
-      if (!reportId) return;
-
-      // Try to find in already loaded list first
-      const found = savedReports.find(
-        (r) => r.reportId === reportId || r._id === reportId,
-      );
-      if (found) {
-        selectReport(found);
-        return;
-      }
-
-      // Fallback: fetch directly from API
-      try {
-        const res = await authFetch(`/api/reports/${reportId}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.data) {
-            selectReport(data.data as ReportItem);
-          }
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    window.addEventListener("sg:open-report", handler);
-    return () => window.removeEventListener("sg:open-report", handler);
-  }, [savedReports]);
-
-  const refreshAllData = async (
-    sDate?: string,
-    eDate?: string,
-    typeVal?: string,
-    ownerVal?: string,
-    statusVal?: string,
-    searchVal?: string,
-  ) => {
-    await Promise.all([
-      loadFilterOptions(
-        sDate !== undefined ? sDate : startDate,
-        eDate !== undefined ? eDate : endDate,
-      ),
-      loadSavedReports(sDate, eDate, typeVal, ownerVal, statusVal, searchVal),
-    ]);
-  };
-
-  const selectReport = async (report: ReportItem) => {
-    const id = report._id || report.reportId || "";
-    setSelectedReportId(id);
-    setReportId(report.reportId || id);
-    setFileName(report.name);
-    setActiveReportMeta(report);
     setActiveHeaderStructure((report as any).headerStructure || null);
     if (Array.isArray(report.headers) && report.headers.length > 0) {
-      setActiveReportHeaders(report.headers.filter((h: string) => !h.startsWith("_")));
+      setActiveReportHeaders(
+        report.headers.filter((h: string) => !h.startsWith("_")),
+      );
     } else {
       setActiveReportHeaders([]);
     }
-    setSelected([]);
-    setViewMode("auto");
 
     if (report.data && Array.isArray(report.data) && report.data.length > 0) {
       const sanitized = (report.data as Record<string, unknown>[]).map(
@@ -2468,10 +2242,7 @@ export function DynamicReportViewer({
       setRows(processedRows);
 
       const preSelected: number[] = [];
-      if (
-        (report as any).approvals &&
-        Array.isArray((report as any).approvals)
-      ) {
+      if ((report as any).approvals && Array.isArray((report as any).approvals)) {
         (report as any).approvals.forEach((app: any) => {
           if (typeof app.rowIndex === "number") {
             preSelected.push(app.rowIndex);
@@ -2496,11 +2267,11 @@ export function DynamicReportViewer({
         }
       });
       setSelected(preSelected);
-    } else {
-      try {
-        const res = await authFetch(`/api/reports/${id}`);
-        if (res.ok) {
-          const resData = await res.json();
+    } else if (reportId) {
+      setLoadingData(true);
+      authFetch(`/api/reports/${reportId}`)
+        .then((res) => res.json())
+        .then((resData) => {
           if (
             resData.success &&
             resData.data &&
@@ -2530,7 +2301,6 @@ export function DynamicReportViewer({
             const processedRows = splitMergedEntries(filled, detectedCols);
             setRows(processedRows);
 
-            const preSelected: number[] = [];
             const fetchedReport = resData.data;
             if (fetchedReport.headerStructure) {
               setActiveHeaderStructure(fetchedReport.headerStructure);
@@ -2544,6 +2314,8 @@ export function DynamicReportViewer({
               );
               setActiveReportHeaders(cleanHeaders);
             }
+
+            const preSelected: number[] = [];
             if (
               fetchedReport.approvals &&
               Array.isArray(fetchedReport.approvals)
@@ -2554,291 +2326,32 @@ export function DynamicReportViewer({
                 }
               });
             }
-            processedRows.forEach(
-              (row: Record<string, string>, idx: number) => {
-                const statusVal = String(
-                  row["Status"] ||
-                    row["Check"] ||
-                    row["Checked"] ||
-                    row["P.Type"] ||
-                    "",
-                ).toLowerCase();
-                if (
-                  statusVal.includes("checked") ||
-                  statusVal.includes("✔") ||
-                  statusVal === "true" ||
-                  statusVal === "1"
-                ) {
-                  if (!preSelected.includes(idx)) preSelected.push(idx);
-                }
-              },
-            );
+            processedRows.forEach((row: Record<string, string>, idx: number) => {
+              const statusVal = String(
+                row["Status"] ||
+                  row["Check"] ||
+                  row["Checked"] ||
+                  row["P.Type"] ||
+                  "",
+              ).toLowerCase();
+              if (
+                statusVal.includes("checked") ||
+                statusVal.includes("✔") ||
+                statusVal === "true" ||
+                statusVal === "1"
+              ) {
+                if (!preSelected.includes(idx)) preSelected.push(idx);
+              }
+            });
             setSelected(preSelected);
           } else {
             setRows([]);
           }
-        }
-      } catch {
-        setRows([]);
-      }
+        })
+        .catch(() => setRows([]))
+        .finally(() => setLoadingData(false));
     }
-    toast(`Loaded report "${report.name}"`);
-  };
-
-  const parseWorkbook = (buffer: ArrayBuffer) => {
-    const workbook = XLSX.read(buffer, { type: "array" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) {
-      return {
-        headers: [],
-        parsed: [],
-        headerStructure: {
-          isMultiLevel: false,
-          mainHeaders: [],
-          subHeaders: [],
-        },
-        layoutMode: "grid",
-        dimensions: {
-          rowCount: 0,
-          colCount: 0,
-          headerRowCount: 0,
-          dataRowCount: 0,
-        },
-      };
-    }
-
-    return scanAndAnalyzeXlsx(sheet);
-  };
-
-  const applyWorkbook = async (buffer: ArrayBuffer, name: string) => {
-    const { headers, parsed, headerStructure } = parseWorkbook(buffer);
-    if (!headers.length || !parsed.length) {
-      toast("No tabular data found in the first sheet");
-      return;
-    }
-
-    setActiveHeaderStructure(headerStructure);
-    const cleanName = name.replace(/\.[^/.]+$/, "");
-    const sanitized = parsed.map((row, idx) => ({
-      ...row,
-      _originalIndex: idx,
-    }));
-    const filled = fillSubEntriesFromMain(sanitized, headers);
-    const processedRows = splitMergedEntries(filled, headers);
-
-    const isMelting = cleanName.toLowerCase().includes("melting");
-
-    if (isMelting) {
-      processedRows.forEach((row) => {
-        row["Purity"] = calculateRowPurity(
-          row,
-          headers,
-          undefined,
-          processedRows,
-        );
-      });
-    }
-
-    const uploadDate = getTodayDateString();
-    setStartDate(uploadDate);
-    setEndDate(uploadDate);
-
-    const preSelected: number[] = [];
-    processedRows.forEach((row, idx) => {
-      const statusVal = String(
-        row["Status"] || row["Check"] || row["Checked"] || row["P.Type"] || "",
-      ).toLowerCase();
-      if (
-        statusVal.includes("checked") ||
-        statusVal.includes("✔") ||
-        statusVal === "true" ||
-        statusVal === "1"
-      ) {
-        preSelected.push(idx);
-      }
-    });
-    setSelected(preSelected);
-
-    let backendMsg = `${parsed.length} rows and ${headers.length} columns detected`;
-    if (parsed.length > 500) {
-      backendMsg = `${parsed.length} rows detected — only the first 500 are saved to the server (local view shows all)`;
-    }
-
-    const cleanBackendData = processedRows.slice(0, 500).map((r) => {
-      const copy: Record<string, unknown> = {};
-      Object.entries(r).forEach(([k, v]) => {
-        if (!k.startsWith("_")) {
-          copy[k] = v;
-        }
-      });
-      if (isMelting && !copy["Purity"]) {
-        copy["Purity"] = calculateRowPurity(
-          r,
-          headers,
-          undefined,
-          processedRows,
-        );
-      }
-      return copy;
-    });
-
-    const cleanRawHeaders = headers.filter((h) => !h.startsWith("_"));
-    const backendHeaders =
-      isMelting && !cleanRawHeaders.some((c) => /purity/i.test(c))
-        ? [...cleanRawHeaders.filter((c) => !/purity/i.test(c)), "Purity"]
-        : cleanRawHeaders;
-
-    let backendHeaderStructure = headerStructure;
-    if (isMelting && headerStructure) {
-      const updatedSubHeaders = headerStructure.subHeaders.some((c) =>
-        /purity/i.test(c),
-      )
-        ? headerStructure.subHeaders
-        : [
-            ...headerStructure.subHeaders.filter((c) => !/purity/i.test(c)),
-            "Purity",
-          ];
-
-      backendHeaderStructure = {
-        ...headerStructure,
-        subHeaders: updatedSubHeaders,
-      };
-    }
-    setActiveHeaderStructure(backendHeaderStructure);
-
-    const reportDate = getTodayDateString();
-
-    try {
-      const currentUser = getAuthUser();
-      const payload = {
-        name: cleanName,
-        type: cleanName,
-        source: "Spreadsheet Upload",
-        owner: currentUser?.name || currentUser?.email || "Unknown",
-        ownerRole: currentUser?.role || "User",
-        data: cleanBackendData,
-        headers: backendHeaders,
-        headerStructure: backendHeaderStructure,
-        createdAt: reportDate,
-      };
-
-      // STEP 1: Pre-check backend to verify if report exists for today & if entries have changes
-      const checkRes = await authFetch("/api/reports/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const checkData = await checkRes.json();
-
-      if (checkData.exists) {
-        if (checkData.isSuperAdminProtected || checkData.isRoleProtected) {
-          const ownerName = checkData.existingReport?.owner || "User";
-          const ownerRoleName = checkData.existingReport?.ownerRole || "User";
-          const reportName = checkData.existingReport?.name || cleanName;
-          const msg =
-            checkData.message ||
-            checkData.error ||
-            `Upload Blocked: Report "${reportName}" was uploaded today by '${ownerName}' (${ownerRoleName}). Users belonging to a different role cannot overwrite or duplicate this report.`;
-
-          const modalTitle = checkData.isSuperAdminProtected
-            ? "Upload Blocked: Protected by Super Admin"
-            : `Upload Blocked: Protected by ${ownerRoleName}`;
-
-          setDuplicateModal({
-            isOpen: true,
-            title: modalTitle,
-            message: msg,
-            isSuperAdminProtected: Boolean(checkData.isSuperAdminProtected),
-            isRoleProtected: true,
-            payload,
-          });
-          toast(msg);
-          return;
-        }
-
-        if (checkData.isExactDuplicate || checkData.contentMatch) {
-          // Exact duplicate entries or content match -> STOP! Do NOT call save POST API!
-          setDuplicateModal({
-            isOpen: true,
-            title: "Upload Blocked: Same-Day Duplicate Report",
-            message: checkData.message || `Report "${cleanName}" has already been uploaded today with identical entries. Duplicate report upload is not allowed.`,
-            payload,
-          });
-          toast(checkData.message || `Upload blocked: Report "${cleanName}" already exists today.`);
-          return;
-        }
-
-        if (checkData.hasEntryChanges) {
-          // Report exists for today, but entries have changes -> Prompt user to update existing report
-          setDuplicateModal({
-            isOpen: true,
-            title: "Existing Report Found with Entry Changes",
-            message: checkData.message || `Report "${cleanName}" already exists for today, but entry changes were detected. Would you like to update today's existing report?`,
-            payload,
-          });
-          toast(`Existing report "${cleanName}" found for today with entry changes.`);
-          return;
-        }
-      }
-
-      // STEP 2: Execute POST create API
-      const res = await authFetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (data.success && data.data) {
-        if (reportDate) {
-          setStartDate(reportDate);
-          setEndDate(reportDate);
-        }
-
-        setRows(processedRows);
-        setFileName(cleanName);
-        setSelectedReportId(data.data.reportId || data.data._id || "");
-        setActiveReportHeaders(backendHeaders);
-        setActiveHeaderStructure(backendHeaderStructure);
-        setViewMode("auto");
-        setSelected(preSelected);
-        setReportId(data.data.reportId || data.data._id || "");
-        setActiveReportMeta(data.data);
-
-        setSavedReports((prev) => [
-          data.data,
-          ...prev.filter(
-            (r) => (r._id || r.reportId) !== (data.data._id || data.data.reportId)
-          ),
-        ]);
-
-        if (data.isUpdated) {
-          backendMsg = data.message || `Corrected entries for report "${cleanName}" updated successfully in today's report!`;
-        } else if (parsed.length <= 500) {
-          backendMsg = `Report "${cleanName}" uploaded and saved to backend!`;
-        }
-
-        await refreshAllData();
-        window.dispatchEvent(new Event("sg:report-uploaded"));
-      } else {
-        backendMsg = `Saving to backend failed${
-          data?.error ? `: ${data.error}` : ""
-        }`;
-      }
-    } catch {
-      backendMsg = `Saving to backend failed — check your connection and re-upload`;
-    }
-
-    toast(backendMsg);
-  };
-
-  const handleUpload = async (file?: File) => {
-    if (!file) return;
-    await applyWorkbook(await file.arrayBuffer(), file.name);
-    if (inputRef.current) inputRef.current.value = "";
-  };
+  }, [report, reportId]);
 
   const columns = useMemo(() => {
     if (!rows.length) return [];
@@ -2906,15 +2419,15 @@ export function DynamicReportViewer({
 
   const isMelting = useMemo(() => {
     const nameStr = (fileName || "").toLowerCase();
-    const metaName = (activeReportMeta?.name || "").toLowerCase();
-    const metaType = (activeReportMeta?.type || "").toLowerCase();
+    const metaName = (report.name || "").toLowerCase();
+    const metaType = (report.type || "").toLowerCase();
 
     return (
       nameStr.includes("melting") ||
       metaName.includes("melting") ||
       metaType.includes("melting")
     );
-  }, [fileName, activeReportMeta]);
+  }, [fileName, report]);
 
   const gridDisplayColumns = useMemo(() => {
     if (!columns.length) return [];
@@ -3019,19 +2532,14 @@ export function DynamicReportViewer({
     purityColIndex,
   ]);
 
-  const explicitEntryTypeColumn = useMemo(
-    () =>
-      columns.find((column) =>
-        /^type$|^p\.?type$|^dr\.?\/?cr$|category|nature|inout/i.test(
-          column.trim(),
-        ),
-      ) || null,
-    [columns],
-  );
-
   const hasCreditDebitEntries = useMemo(() => {
     if (!rows.length) return false;
 
+    const explicitEntryTypeColumn = columns.find((column) =>
+      /^type$|^p\.?type$|^dr\.?\/?cr$|category|nature|inout/i.test(
+        column.trim(),
+      ),
+    );
     if (explicitEntryTypeColumn) {
       const hasTypeVal = rows.some((row) => {
         const typeVal = String(row[explicitEntryTypeColumn] ?? "")
@@ -3057,7 +2565,7 @@ export function DynamicReportViewer({
     }
 
     return false;
-  }, [rows, explicitEntryTypeColumn, columns, activeHeaderStructure]);
+  }, [rows, columns, activeHeaderStructure]);
 
   const effectiveViewMode =
     viewMode === "auto"
@@ -3084,7 +2592,7 @@ export function DynamicReportViewer({
   const filteredRows = useMemo(
     () =>
       rows.filter((row) => {
-        if (query.trim()) {
+        if (query && query.trim()) {
           const q = query.toLowerCase();
           const matchesQuery = Object.entries(row).some(([k, val]) => {
             if (k === "_originalIndex") return false;
@@ -3096,10 +2604,6 @@ export function DynamicReportViewer({
       }),
     [rows, query],
   );
-
-  // Reset table page when search query or loaded rows change
-  // (placed here so it runs after visibleGridRows is computed)
-  // We derive it from visibleGridRows length via an effect below.
 
   const visibleGridRows = useMemo(
     () =>
@@ -3123,8 +2627,6 @@ export function DynamicReportViewer({
       }),
     [filteredRows, rowGroupMeta, columns],
   );
-
-
 
   const grandTotals = useMemo(() => {
     const totals: Record<string, number> = {};
@@ -3215,8 +2717,1294 @@ export function DynamicReportViewer({
     }
   };
 
+  const saveApprovalsToBackend = async () => {
+    const activeId = report._id || report.reportId || "";
+    const currentUser = getAuthUser();
+    let backendMsg =
+      selected.length > 0
+        ? `${selected.length} row(s) saved with approval audit trail`
+        : "All approvals cleared.";
+
+    const idColumns = [
+      "Party",
+      "Name",
+      "Description",
+      "Item",
+      "Particular",
+      "TransNo",
+      "Party Name",
+    ];
+    const getRowId = (row: Record<string, string>): string | undefined => {
+      for (const col of idColumns) {
+        const val = row[col]?.trim();
+        if (val) return val;
+      }
+      return Object.entries(row).find(
+        ([k, v]) => !k.startsWith("_") && v?.trim(),
+      )?.[1];
+    };
+
+    const selectedEntries = selected.map((idx) => {
+      const row = rows.find(
+        (r) => (r as any)._originalIndex === idx,
+      ) as Record<string, string> | undefined;
+      return {
+        rowIndex: idx,
+        rowId: row ? getRowId(row) : undefined,
+      };
+    });
+
+    try {
+      const res = await authFetch(`/api/reports/${activeId}/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selectedIndexes: selected,
+          selectedEntries,
+          approvedBy: currentUser?.name || currentUser?.email || "Unknown",
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.message) {
+        backendMsg = data.message;
+        await refreshAllData();
+      } else if (data.error) {
+        backendMsg = data.error;
+      }
+    } catch {
+      backendMsg =
+        "Failed to save approvals — check your connection and try again";
+    }
+
+    toast(backendMsg);
+  };
+
+  const exportFilteredRowsToXlsx = () => {
+    if (filteredRows.length === 0) {
+      toast("No data available to export");
+      return;
+    }
+    const exportCols = gridDisplayColumns;
+    const sanitizedExportData = filteredRows.map((r) => {
+      const copy: Record<string, any> = {};
+      exportCols.forEach((col) => {
+        if (/purity/i.test(col)) {
+          copy[col] = r[col] || calculateRowPurity(r, columns, undefined, rows);
+        } else {
+          copy[col] = r[col] ?? "";
+        }
+      });
+      return copy;
+    });
+    const worksheet = XLSX.utils.json_to_sheet(sanitizedExportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Filtered Report Data");
+
+    const cleanBase = (fileName || "report").toLowerCase().replace(/\s+/g, "-");
+    const outputFileName = `${cleanBase}-filtered.xlsx`;
+    XLSX.writeFile(workbook, outputFileName);
+    toast(`Exported ${filteredRows.length} rows to XLSX`);
+
+    authFetch("/api/audit-logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        module: "Reports",
+        section: `Report ${fileName}`,
+        action: "Export XLSX",
+        details: `Exported ${filteredRows.length} records from report "${fileName}" to XLSX`,
+      }),
+    }).catch(() => {});
+  };
+
+  const formattedCreatedDate = (() => {
+    if (!report.createdAt) return "";
+    if (typeof report.createdAt === "string") {
+      const match = report.createdAt.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        return `${match[3]}/${match[2]}/${match[1]}`;
+      }
+    }
+    const d = new Date(report.createdAt);
+    if (isNaN(d.getTime())) return String(report.createdAt);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  })();
+
+  return (
+    <div className="rounded-2xl border border-slate-200/80 bg-white shadow-xl overflow-hidden mb-6">
+      {/* Report Header Bar */}
+      <div className="flex flex-col justify-between gap-4 border-b border-slate-100 p-4 sm:p-5 lg:flex-row lg:items-center bg-slate-50/60">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h3 className="text-base font-bold text-slate-900">{fileName}</h3>
+          {report.owner && (
+            <span className="text-xs text-slate-500 font-medium">
+              By: <strong className="text-slate-700 font-semibold">{report.owner}</strong>
+            </span>
+          )}
+          {report.owner && formattedCreatedDate && (
+            <span className="text-slate-300">•</span>
+          )}
+          {formattedCreatedDate && (
+            <span className="text-xs text-slate-500 font-medium">
+              {formattedCreatedDate}
+            </span>
+          )}
+        </div>
+
+        {/* Action Controls for this report */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Export XLSX Button */}
+          {permissions.export && (
+            <button
+              type="button"
+              onClick={exportFilteredRowsToXlsx}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 hover:bg-emerald-100 hover:border-emerald-400 transition shadow-2xs cursor-pointer"
+              title={`Export "${fileName}" to Excel XLSX`}
+            >
+              <FileSpreadsheet size={14} className="text-emerald-700" />
+              Export XLSX
+            </button>
+          )}
+
+          {/* Delete Report Button */}
+          {permissions.delete && (
+            <button
+              type="button"
+              onClick={() => onRequestDelete(report)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 text-xs font-bold text-rose-700 hover:bg-rose-100 hover:border-rose-400 transition shadow-2xs cursor-pointer"
+              title={`Delete report "${fileName}"`}
+            >
+              <Trash2 size={14} className="text-rose-600" />
+              Delete Report
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Table / Ledger / Analytics Content */}
+      {loadingData ? (
+        <div className="p-12 text-center text-slate-500 flex items-center justify-center gap-2">
+          <RefreshCw size={18} className="animate-spin text-[#18476A]" />
+          <span className="text-xs font-semibold">Loading report data...</span>
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="p-12 text-center">
+          <div className="mx-auto mb-3.5 grid h-14 w-14 place-items-center rounded-2xl bg-slate-100/80 text-slate-400">
+            <FileSpreadsheet size={28} />
+          </div>
+          <h3 className="text-base font-bold text-slate-800">
+            No data available in "{fileName}"
+          </h3>
+        </div>
+      ) : (
+        <>
+          {effectiveViewMode === "ledger" && (
+            <div>
+              {visibleGridRows.some((r) => r._isModified) && (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/95 border border-amber-300/80 p-3 px-4 text-xs text-amber-900 rounded-xl mb-3 mx-4 mt-4 shadow-2xs animate-in fade-in">
+                  <div className="flex items-center gap-2 font-medium">
+                    <div className="grid h-6 w-6 place-items-center rounded-lg bg-amber-200/90 text-amber-800 shrink-0">
+                      <Sparkles size={14} />
+                    </div>
+                    <span>
+                      <strong>Modified Entry Data Detected:</strong> Highlighted
+                      ledger rows contain updated values.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 font-bold text-[11px] bg-amber-200/90 text-amber-900 px-2.5 py-1 rounded-lg border border-amber-300 shadow-2xs shrink-0">
+                    <RefreshCw
+                      size={12}
+                      className="text-amber-700 animate-spin-slow"
+                    />
+                    {visibleGridRows.filter((r) => r._isModified).length}{" "}
+                    Modified Entries
+                  </div>
+                </div>
+              )}
+              <LedgerTableView
+                rows={visibleGridRows}
+                columns={columns}
+                transactionKey={transactionKey!}
+                typeKey={typeKey!}
+                amountKey={amountKey!}
+                selected={selected}
+                toggleApproval={toggleApproval}
+                getRelatedGroupIndices={getRelatedGroupIndices}
+                rowGroupMeta={rowGroupMeta}
+                entryColorPalette={entryColorPalette}
+                canDelete={false}
+              />
+            </div>
+          )}
+
+          {effectiveViewMode === "grid" && (
+            <div className="max-h-[750px] xl:max-h-[calc(100vh-230px)] overflow-auto">
+              {visibleGridRows.some((r) => r._isModified) && (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/95 border border-amber-300/80 p-3 px-4 text-xs text-amber-900 rounded-xl mb-3 mx-4 mt-4 shadow-2xs animate-in fade-in">
+                  <div className="flex items-center gap-2 font-medium">
+                    <div className="grid h-6 w-6 place-items-center rounded-lg bg-amber-200/90 text-amber-800 shrink-0">
+                      <Sparkles size={14} />
+                    </div>
+                    <span>
+                      <strong>Modified Entry Data Detected:</strong> Highlighted
+                      rows contain updated values.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 font-bold text-[11px] bg-amber-200/90 text-amber-900 px-2.5 py-1 rounded-lg border border-amber-300 shadow-2xs shrink-0">
+                    <RefreshCw
+                      size={12}
+                      className="text-amber-700 animate-spin-slow"
+                    />
+                    {visibleGridRows.filter((r) => r._isModified).length}{" "}
+                    Modified Entries
+                  </div>
+                </div>
+              )}
+              <table className="w-full min-w-[900px] border-separate border-spacing-0 text-left">
+                {activeHeaderStructure &&
+                activeHeaderStructure.isMultiLevel &&
+                ((activeHeaderStructure.levels &&
+                  activeHeaderStructure.levels.length > 0) ||
+                  activeHeaderStructure.mainHeaders.length > 0) ? (
+                  <thead className="sticky top-0 z-20 bg-[#18476A] font-sans text-xs border-b border-white/40 shadow-sm">
+                    {activeHeaderStructure.levels &&
+                    activeHeaderStructure.levels.length > 0 ? (
+                      <>
+                        {activeHeaderStructure.levels.map((lvl, lIdx) => {
+                          const displayGroups = buildDisplayHeaderGroups(
+                            lvl.groups,
+                            gridDisplayColumns,
+                          );
+
+                          return (
+                            <tr
+                              key={lIdx}
+                              className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider border-b border-white/20"
+                            >
+                              {lIdx === 0 && (
+                                <th
+                                  rowSpan={
+                                    activeHeaderStructure.levels!.length + 1
+                                  }
+                                  className="sticky left-0 z-30 bg-[#18476A] px-4 py-2.5 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle text-center"
+                                >
+                                  <div className="flex items-center justify-center gap-2 whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={toggleSelectAll}
+                                      className={`grid h-4 w-4 place-items-center rounded border transition ${
+                                        selected.length ===
+                                          visibleGridRows.length &&
+                                        visibleGridRows.length > 0
+                                          ? "border-emerald-400 bg-emerald-500 text-white"
+                                          : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                                      }`}
+                                      title="Toggle Select All"
+                                    >
+                                      <Check size={11} strokeWidth={3} />
+                                    </button>
+                                    <span className="text-white font-bold text-xs whitespace-nowrap">
+                                      APPROVE
+                                    </span>
+                                  </div>
+                                </th>
+                              )}
+                              {displayGroups.map((grp, gIdx) => (
+                                <th
+                                  key={gIdx}
+                                  colSpan={grp.colSpan}
+                                  rowSpan={grp.rowSpan || 1}
+                                  className="px-3.5 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] uppercase tracking-wider text-xs whitespace-nowrap align-middle"
+                                >
+                                  {grp.title}
+                                </th>
+                              ))}
+                            </tr>
+                          );
+                        })}
+
+                        <tr className="bg-[#18476A] text-white font-bold text-xs">
+                          {gridDisplayColumns.map((colKey, idx) => {
+                            const displayLabel = colKey.replace(
+                              /\s*\(\d+\)$/,
+                              "",
+                            );
+                            const isNum =
+                              /pieces|weight|wt|fine|amt|amount|price|credit|debit|purity/i.test(
+                                colKey,
+                              );
+                            return (
+                              <th
+                                key={idx}
+                                className={`px-3.5 py-2.5 border-r border-b border-white/40 font-bold text-white whitespace-nowrap text-xs align-middle ${
+                                  isNum ? "text-right" : "text-left"
+                                }`}
+                              >
+                                {displayLabel}
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </>
+                    ) : (
+                      <tr className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider">
+                        <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle">
+                          <div className="flex items-center gap-2 whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={toggleSelectAll}
+                              className={`grid h-4 w-4 place-items-center rounded border transition ${
+                                selected.length === visibleGridRows.length &&
+                                visibleGridRows.length > 0
+                                  ? "border-emerald-400 bg-emerald-500 text-white"
+                                  : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                              }`}
+                              title="Toggle Select All"
+                            >
+                              <Check size={11} strokeWidth={3} />
+                            </button>
+                            <span className="text-white font-bold text-xs whitespace-nowrap">
+                              APPROVE
+                            </span>
+                          </div>
+                        </th>
+                        {(() => {
+                          const displayGroups = buildDisplayHeaderGroups(
+                            activeHeaderStructure.mainHeaders,
+                            gridDisplayColumns,
+                          );
+                          return (
+                            <>
+                              {displayGroups.map((grp, idx) => (
+                                <th
+                                  key={idx}
+                                  colSpan={grp.colSpan}
+                                  className="px-3.5 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] uppercase tracking-wider text-xs whitespace-nowrap align-middle"
+                                >
+                                  {grp.title}
+                                </th>
+                              ))}
+                            </>
+                          );
+                        })()}
+                      </tr>
+                    )}
+                  </thead>
+                ) : headerLayoutMode === "melting" ? (
+                  <thead className="sticky top-0 z-20 bg-[#18476A] font-sans text-xs border-b border-white/40 shadow-sm">
+                    <tr className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider">
+                      <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle">
+                        <div className="flex items-center gap-2 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={toggleSelectAll}
+                            className={`grid h-4 w-4 place-items-center rounded border transition ${
+                              selected.length === visibleGridRows.length &&
+                              visibleGridRows.length > 0
+                                ? "border-emerald-400 bg-emerald-500 text-white"
+                                : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                            }`}
+                            title="Toggle Select All"
+                          >
+                            <Check size={11} strokeWidth={3} />
+                          </button>
+                          <span className="text-white font-bold text-xs whitespace-nowrap">
+                            APPROVE
+                          </span>
+                        </div>
+                      </th>
+                      {baseColsCount > 0 && (
+                        <th
+                          colSpan={baseColsCount}
+                          className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"
+                        ></th>
+                      )}
+                      <th
+                        colSpan={inSpanCount}
+                        className="px-4 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] whitespace-nowrap align-middle"
+                      >
+                        [B] IN
+                      </th>
+                      {purityColIndex !== -1 && (
+                        <th className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"></th>
+                      )}
+                      <th
+                        colSpan={outSpanCount}
+                        className="px-4 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] whitespace-nowrap align-middle"
+                      >
+                        [C] OUT
+                      </th>
+                      {trailingColsCount > 0 && (
+                        <th
+                          colSpan={trailingColsCount}
+                          className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"
+                        ></th>
+                      )}
+                    </tr>
+
+                    <tr className="bg-[#18476A] text-white font-bold text-xs">
+                      <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 text-white text-left whitespace-nowrap align-middle">
+                        #
+                      </th>
+                      {meltingColumns.map((colName, idx) => {
+                        const displayLabel = colName.replace(
+                          /\s*\(\d+\)$/,
+                          "",
+                        );
+                        const isNum =
+                          /pieces|weight|wt|fine|amt|amount|price|credit|debit/i.test(
+                            colName,
+                          );
+                        return (
+                          <th
+                            key={idx}
+                            className={`px-3.5 py-2 border-r border-b border-white/40 font-bold text-white whitespace-nowrap text-xs align-middle ${
+                              isNum ? "text-right" : "text-left"
+                            }`}
+                          >
+                            {displayLabel}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                ) : (
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-[#18476A] text-[10.5px] font-bold uppercase tracking-[0.08em] text-white">
+                      <th className="sticky left-0 bg-[#18476A] px-5 py-3.5 border-b border-r border-white/20 text-white whitespace-nowrap align-middle">
+                        <div className="flex items-center gap-2 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={toggleSelectAll}
+                            className={`grid h-4 w-4 place-items-center rounded border transition ${
+                              selected.length === visibleGridRows.length &&
+                              visibleGridRows.length > 0
+                                ? "border-emerald-400 bg-emerald-500 text-white"
+                                : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                            }`}
+                          >
+                            <Check size={11} strokeWidth={3} />
+                          </button>
+                          <span className="text-white font-bold whitespace-nowrap">
+                            Approve
+                          </span>
+                        </div>
+                      </th>
+                      {columns.map((column) => {
+                        const displayLabel = column.replace(
+                          /\s*\(\d+\)$/,
+                          "",
+                        );
+                        return (
+                          <th
+                            key={column}
+                            className="border-b border-r border-white/20 bg-[#18476A] px-5 py-3.5 font-bold text-white whitespace-nowrap align-middle"
+                          >
+                            {displayLabel}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                )}
+                <tbody>
+                  {visibleGridRows.map((row, index) => {
+                    const origIndex =
+                      typeof row._originalIndex === "number"
+                        ? (row._originalIndex as number)
+                        : index;
+                    const groupIndices = getRelatedGroupIndices(origIndex);
+                    const isRowApproved = selected.includes(origIndex);
+
+                    const meta = rowGroupMeta.get(origIndex);
+                    const groupId = meta?.groupId ?? index;
+                    const band = getEntryBandStyle(
+                      groupId,
+                      entryColorPalette,
+                    );
+
+                    const prevRow =
+                      index > 0 ? visibleGridRows[index - 1] : null;
+                    const prevOrigIndex = prevRow
+                      ? typeof prevRow._originalIndex === "number"
+                        ? (prevRow._originalIndex as number)
+                        : index - 1
+                      : null;
+                    const prevMeta =
+                      prevOrigIndex !== null
+                        ? rowGroupMeta.get(prevOrigIndex)
+                        : null;
+                    const isNewEntryStart =
+                      index === 0 ||
+                      (prevMeta && prevMeta.groupId !== groupId);
+
+                    const user = getAuthUser();
+                    const currentUserName =
+                      user?.name || user?.email?.split("@")[0] || "BHAVESH";
+
+                    const isRowModified = Boolean(row._isModified);
+                    const isNewRowEntry = Boolean(row._isNewEntry);
+
+                    return (
+                      <tr
+                        key={origIndex}
+                        className={`transition-colors duration-150 ${
+                          isRowApproved
+                            ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
+                            : isRowModified
+                              ? "bg-amber-50/90 hover:bg-amber-100/90 border-l-4 border-l-amber-500 shadow-2xs"
+                              : isNewRowEntry
+                                ? "bg-emerald-50/80 hover:bg-emerald-100/80 border-l-4 border-l-emerald-500"
+                                : `${band.base} ${band.hover}`
+                        } ${
+                          isNewEntryStart && index > 0
+                            ? "border-t-2 border-slate-300/80 shadow-[0_-1px_0_rgba(0,0,0,0.04)]"
+                            : "border-b border-slate-100"
+                        }`}
+                      >
+                        <td
+                          className={`sticky left-0 border-r border-b border-slate-100 bg-inherit px-4 py-2.5 whitespace-nowrap align-middle ${
+                            !isRowApproved && entryColorPalette !== "none"
+                              ? band.border
+                              : ""
+                          }`}
+                        >
+                          <div className="flex flex-col items-start gap-1 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => toggleApproval(origIndex)}
+                                title={
+                                  isRowApproved
+                                    ? `Row #${origIndex + 1} Selected - click to deselect`
+                                    : `Select Row #${origIndex + 1}`
+                                }
+                                className={`grid h-5 w-5 place-items-center rounded border transition ${
+                                  isRowApproved
+                                    ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
+                                    : "border-slate-300 bg-white text-transparent hover:border-slate-400"
+                                }`}
+                              >
+                                {isRowApproved ? (
+                                  <Check size={13} strokeWidth={3} />
+                                ) : (
+                                  <Check size={13} strokeWidth={3} />
+                                )}
+                              </button>
+                            </div>
+                            {isRowApproved && (
+                              <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
+                                By - {currentUserName}
+                              </span>
+                            )}
+                            {isNewEntryStart && isRowModified && (
+                              <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
+                                <RefreshCw
+                                  size={9}
+                                  className="text-amber-700 animate-spin-slow"
+                                />{" "}
+                                Modified
+                              </span>
+                            )}
+                            {isNewEntryStart && isNewRowEntry && (
+                              <span className="inline-flex items-center gap-1 rounded bg-emerald-100/90 border border-emerald-300 px-1 py-0.5 text-[9px] font-bold text-emerald-900 whitespace-nowrap shadow-2xs mt-0.5">
+                                <Sparkles
+                                  size={9}
+                                  className="text-emerald-700"
+                                />{" "}
+                                New Entry
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {gridDisplayColumns.map((column) => {
+                          const isPurityCol =
+                            isMelting && /purity/i.test(column);
+                          const rawRowPurity = String(
+                            row[column] ?? "",
+                          ).trim();
+                          const hasRowPurity =
+                            rawRowPurity !== "" &&
+                            rawRowPurity !== "—" &&
+                            rawRowPurity !== "-" &&
+                            rawRowPurity.toLowerCase() !== "null" &&
+                            rawRowPurity.toLowerCase() !== "undefined" &&
+                            rawRowPurity !== "0.00%" &&
+                            rawRowPurity !== "0%" &&
+                            rawRowPurity !== "0";
+
+                          const purityValue = isPurityCol
+                            ? hasRowPurity
+                              ? rawRowPurity.includes("%") ||
+                                isNaN(Number(rawRowPurity.replace(/%/g, "")))
+                                ? rawRowPurity
+                                : `${Number(rawRowPurity.replace(/%/g, "")).toFixed(2)}%`
+                              : calculateRowPurity(
+                                  row,
+                                  columns,
+                                  groupIndices,
+                                  rows,
+                                )
+                            : "";
+                          const isNum =
+                            /pieces|weight|wt|fine|amt|amount|price|credit|debit|purity/i.test(
+                              column,
+                            );
+
+                          const fieldDiff = (
+                            row._diff as
+                              | Record<string, { old: unknown; new: unknown }>
+                              | undefined
+                          )?.[column];
+
+                          const baseValNode = isPurityCol ? (
+                            isNewEntryStart &&
+                            purityValue !== "—" &&
+                            purityValue !== "" ? (
+                              <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200 shadow-xs whitespace-nowrap">
+                                {purityValue}
+                              </span>
+                            ) : (
+                              "—"
+                            )
+                          ) : column === typeKey ? (
+                            <span
+                              className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${
+                                /debit/i.test(row[column])
+                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                  : /credit/i.test(row[column])
+                                    ? "bg-teal-50 text-teal-700 border border-teal-200"
+                                    : "bg-slate-100 text-slate-700"
+                              }`}
+                            >
+                              {row[column]}
+                            </span>
+                          ) : (
+                            row[column] || "—"
+                          );
+
+                          if (fieldDiff) {
+                            return (
+                              <td
+                                key={column}
+                                className={`border-b border-l border-slate-100 px-3 py-2 text-xs font-medium whitespace-nowrap align-middle bg-amber-100/40 ${
+                                  isNum ? "text-right font-mono" : "text-left"
+                                }`}
+                              >
+                                <div className="group relative inline-flex items-center gap-1.5 justify-end w-full">
+                                  <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 px-2 py-0.5 font-bold text-amber-950 border border-amber-300 shadow-2xs">
+                                    {baseValNode}
+                                    <span className="h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse" />
+                                  </span>
+                                  <div className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:flex flex-col gap-1.5 rounded-xl bg-slate-900 p-2.5 text-[11px] text-white shadow-2xl z-50 whitespace-nowrap border border-slate-700 animate-in fade-in zoom-in-95">
+                                    <div className="flex items-center gap-1 font-bold text-amber-400 border-b border-slate-800 pb-1">
+                                      <Sparkles size={12} /> Entry Value Changed
+                                    </div>
+                                    <div className="flex items-center gap-2 text-slate-300">
+                                      <span className="text-slate-400 font-medium">
+                                        Original (Old):
+                                      </span>
+                                      <span className="line-through text-rose-300 font-mono font-bold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800/60">
+                                        {String(fieldDiff.old ?? "—")}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-slate-100">
+                                      <span className="text-slate-400 font-medium">
+                                        Updated (New):
+                                      </span>
+                                      <span className="text-emerald-300 font-mono font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
+                                        {String(
+                                          fieldDiff.new ?? row[column] ?? "—",
+                                        )}
+                                      </span>
+                                    </div>
+                                    {row._modifiedBy && (
+                                      <div className="text-[9.5px] text-slate-400 border-t border-slate-800 pt-1 mt-0.5">
+                                        Modified by {String(row._modifiedBy)}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          return (
+                            <td
+                              key={column}
+                              className={`border-b border-l border-slate-100 px-4 py-2.5 text-xs font-medium whitespace-nowrap align-middle ${
+                                isNum ? "text-right font-mono" : "text-left"
+                              } ${
+                                isPurityCol
+                                  ? "font-bold text-emerald-900"
+                                  : "text-slate-700"
+                              }`}
+                            >
+                              {baseValNode}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+
+                {Object.keys(grandTotals).length > 0 && (
+                  <tfoot>
+                    <tr className="sticky bottom-0 border-t-2 border-[#123955] bg-[#18476A] text-white">
+                      <td className="sticky left-0 z-30 bg-[#18476A] px-4 py-3 text-xs font-bold whitespace-nowrap min-w-[140px] align-middle border-r border-white/20">
+                        Grand Total ({visibleGridRows.length} entries)
+                      </td>
+                      {gridDisplayColumns.map((column) => {
+                        const isPurityCol =
+                          isMelting && /purity/i.test(column);
+                        return (
+                          <td
+                            key={column}
+                            className="border-l border-white/10 px-4 py-3 text-right text-xs font-bold whitespace-nowrap align-middle font-mono"
+                          >
+                            {isPurityCol
+                              ? grandTotalPurity
+                              : numericColumnsForTotals.includes(column)
+                                ? (grandTotals[column] ?? 0).toLocaleString(
+                                    "en-IN",
+                                    {
+                                      minimumFractionDigits: Number.isInteger(
+                                        grandTotals[column] ?? 0,
+                                      )
+                                        ? 0
+                                        : /wt|weight|fine/i.test(column)
+                                          ? 3
+                                          : 2,
+                                      maximumFractionDigits: 3,
+                                    },
+                                  )
+                                : ""}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+              {visibleGridRows.length === 0 && (
+                <div className="p-12 text-center text-sm text-slate-400">
+                  No matching rows found in this report. Try resetting your
+                  query or filters.
+                </div>
+              )}
+            </div>
+          )}
+
+          {effectiveViewMode === "analytics" && (
+            <div className="p-6">
+              <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <PieChart size={16} className="text-[#18476A]" />
+                Report Data Breakdown &amp; Distribution
+              </h4>
+              <div className="grid gap-4 sm:grid-cols-3 mb-6">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                  <span className="text-xs text-slate-500 font-semibold">
+                    Total Records
+                  </span>
+                  <p className="mt-1 text-2xl font-bold text-slate-900">
+                    {filteredRows.length}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                  <span className="text-xs text-slate-500 font-semibold">
+                    Approved Records
+                  </span>
+                  <p className="mt-1 text-2xl font-bold text-emerald-600">
+                    {selected.length} (
+                    {filteredRows.length
+                      ? Math.round(
+                          (selected.length / filteredRows.length) * 100,
+                        )
+                      : 0}
+                    %)
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                  <span className="text-xs text-slate-500 font-semibold">
+                    Detected Fields
+                  </span>
+                  <p className="mt-1 text-2xl font-bold text-[#18476A]">
+                    {columns.length}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <h5 className="text-xs font-bold text-slate-700 mb-3">
+                  Detected Columns Catalog
+                </h5>
+                <div className="flex flex-wrap gap-2">
+                  {columns.map((col) => (
+                    <span
+                      key={col}
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700"
+                    >
+                      {col}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Footer & Approval Action */}
+          <div className="flex flex-col justify-between gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:px-6 bg-slate-50/30">
+            <p className="text-[11px] text-slate-400">
+              Showing{" "}
+              <span className="font-semibold text-slate-600">
+                {filteredRows.length}
+              </span>{" "}
+              of {rows.length} rows ·{" "}
+              <span className="font-semibold text-emerald-600">
+                {selected.length} marked approved
+              </span>
+            </p>
+            <button
+              type="button"
+              onClick={saveApprovalsToBackend}
+              disabled={selected.length === 0}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <Check size={15} />
+              Save {selected.length} Approved Entries
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function DynamicReportViewer({
+  query,
+  setQuery,
+  permissions = {
+    view: true,
+    add: true,
+    update: true,
+    delete: true,
+    export: true,
+  },
+}: {
+  query: string;
+  setQuery?: (value: string) => void;
+  permissions?: PermissionActions;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const [savedReports, setSavedReports] = useState<ReportItem[]>([]);
+  const [loadingReports, setLoadingReports] = useState(false);
+
+  const [entryColorPalette] = useState<EntryColorPaletteKey>("classic");
+  const [headerLayoutMode] = useState<"melting" | "standard">("melting");
+
+  const [filterOptions, setFilterOptions] = useState<{
+    types: string[];
+    owners: string[];
+    statuses: string[];
+  }>({ types: [], owners: [], statuses: [] });
+  const [selectedType, setSelectedType] = useState<string>("");
+  const [selectedOwner] = useState<string>("");
+  const [selectedStatus] = useState<string>("");
+
+  const getTodayDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const [startDate, setStartDate] = useState<string>(getTodayDateString());
+  const [endDate, setEndDate] = useState<string>(getTodayDateString());
+
+  const [notice, setNotice] = useState("");
+
+  const toast = (message: string) => {
+    setNotice(message);
+    window.setTimeout(() => setNotice(""), 2500);
+  };
+
+  const loadFilterOptions = async (sDate?: string, eDate?: string) => {
+    try {
+      const s = sDate !== undefined ? sDate : startDate;
+      const e = eDate !== undefined ? eDate : endDate;
+      const params = new URLSearchParams();
+      if (s) params.append("startDate", s);
+      if (e) params.append("endDate", e);
+      const queryParams = params.toString() ? `?${params.toString()}` : "";
+
+      const res = await authFetch(`/api/reports/filters/options${queryParams}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.data) {
+          setFilterOptions(data.data);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load dynamic filter options:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadFilterOptions(startDate, endDate);
+  }, [startDate, endDate]);
+
+  const availableReportTypes = useMemo(() => {
+    const set = new Set<string>();
+    if (Array.isArray(savedReports)) {
+      savedReports.forEach((r) => {
+        if (r.name && r.name.trim()) set.add(r.name.trim());
+        if (r.type && r.type.trim()) set.add(r.type.trim());
+      });
+    }
+    if (filterOptions.types && filterOptions.types.length > 0) {
+      filterOptions.types.forEach((t) => {
+        if (t && t.trim()) set.add(t.trim());
+      });
+    }
+    const list = Array.from(set);
+    const humanTitles = new Set(list.filter((name) => !name.includes("_")));
+    const filteredList = list.filter((name) => {
+      if (name.includes("_")) {
+        const cleanAlpha = name.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+        const hasHumanMatch = Array.from(humanTitles).some(
+          (h) => h.replace(/[^A-Z0-9]/gi, "").toUpperCase() === cleanAlpha,
+        );
+        if (hasHumanMatch) return false;
+      }
+      return true;
+    });
+
+    return filteredList.sort();
+  }, [savedReports, filterOptions.types]);
+
+  const loadSavedReports = async (
+    sDate?: string,
+    eDate?: string,
+    typeVal?: string,
+    ownerVal?: string,
+    statusVal?: string,
+    searchVal?: string,
+  ) => {
+    setLoadingReports(true);
+    try {
+      const s = sDate !== undefined ? sDate : startDate;
+      const e = eDate !== undefined ? eDate : endDate;
+      const t = typeVal !== undefined ? typeVal : selectedType;
+      const o = ownerVal !== undefined ? ownerVal : selectedOwner;
+      const st = statusVal !== undefined ? statusVal : selectedStatus;
+      const q = searchVal !== undefined ? searchVal : query;
+
+      const params = new URLSearchParams();
+      if (s) params.append("startDate", s);
+      if (e) params.append("endDate", e);
+      if (t) params.append("type", t);
+      if (o) params.append("owner", o);
+      if (st) params.append("status", st);
+      if (q && q.trim()) params.append("search", q.trim());
+
+      const queryParams = params.toString() ? `?${params.toString()}` : "";
+
+      const res = await authFetch(`/api/reports${queryParams}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+          setSavedReports(data.data);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load reports:", err);
+    } finally {
+      setLoadingReports(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSavedReports(
+      startDate,
+      endDate,
+      selectedType,
+      selectedOwner,
+      selectedStatus,
+      query,
+    );
+  }, [startDate, endDate, selectedType, selectedOwner, selectedStatus, query]);
+
+  const refreshAllData = async (
+    sDate?: string,
+    eDate?: string,
+    typeVal?: string,
+  ) => {
+    await Promise.all([
+      loadFilterOptions(
+        sDate !== undefined ? sDate : startDate,
+        eDate !== undefined ? eDate : endDate,
+      ),
+      loadSavedReports(
+        sDate !== undefined ? sDate : startDate,
+        eDate !== undefined ? eDate : endDate,
+        typeVal !== undefined ? typeVal : selectedType,
+      ),
+    ]);
+  };
+
+  const displayedReports = useMemo(() => {
+    if (!selectedType) return savedReports;
+    return savedReports.filter(
+      (r) =>
+        r.name === selectedType ||
+        r.type === selectedType ||
+        (r.name && r.name.trim().toLowerCase() === selectedType.trim().toLowerCase()) ||
+        (r.type && r.type.trim().toLowerCase() === selectedType.trim().toLowerCase()),
+    );
+  }, [savedReports, selectedType]);
+
+  const parseWorkbook = (buffer: ArrayBuffer) => {
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) {
+      return {
+        headers: [],
+        parsed: [],
+        headerStructure: {
+          isMultiLevel: false,
+          mainHeaders: [],
+          subHeaders: [],
+        },
+        layoutMode: "grid",
+        dimensions: {
+          rowCount: 0,
+          colCount: 0,
+          headerRowCount: 0,
+          dataRowCount: 0,
+        },
+      };
+    }
+
+    return scanAndAnalyzeXlsx(sheet);
+  };
+
+  const applyWorkbook = async (buffer: ArrayBuffer, name: string) => {
+    const { headers, parsed, headerStructure } = parseWorkbook(buffer);
+    if (!headers.length || !parsed.length) {
+      toast("No tabular data found in the first sheet");
+      return;
+    }
+
+    const cleanName = name.replace(/\.[^/.]+$/, "");
+    const sanitized = parsed.map((row, idx) => ({
+      ...row,
+      _originalIndex: idx,
+    }));
+    const filled = fillSubEntriesFromMain(sanitized, headers);
+    const processedRows = splitMergedEntries(filled, headers);
+
+    const isMelting = cleanName.toLowerCase().includes("melting");
+
+    if (isMelting) {
+      processedRows.forEach((row) => {
+        row["Purity"] = calculateRowPurity(
+          row,
+          headers,
+          undefined,
+          processedRows,
+        );
+      });
+    }
+
+    const uploadDate = getTodayDateString();
+    setStartDate(uploadDate);
+    setEndDate(uploadDate);
+
+    let backendMsg = `${parsed.length} rows and ${headers.length} columns detected`;
+
+    const cleanBackendData = processedRows.slice(0, 500).map((r) => {
+      const copy: Record<string, unknown> = {};
+      Object.entries(r).forEach(([k, v]) => {
+        if (!k.startsWith("_")) {
+          copy[k] = v;
+        }
+      });
+      if (isMelting && !copy["Purity"]) {
+        copy["Purity"] = calculateRowPurity(
+          r,
+          headers,
+          undefined,
+          processedRows,
+        );
+      }
+      return copy;
+    });
+
+    const cleanRawHeaders = headers.filter((h) => !h.startsWith("_"));
+    const backendHeaders =
+      isMelting && !cleanRawHeaders.some((c) => /purity/i.test(c))
+        ? [...cleanRawHeaders.filter((c) => !/purity/i.test(c)), "Purity"]
+        : cleanRawHeaders;
+
+    let backendHeaderStructure = headerStructure;
+    if (isMelting && headerStructure) {
+      const updatedSubHeaders = headerStructure.subHeaders.some((c) =>
+        /purity/i.test(c),
+      )
+        ? headerStructure.subHeaders
+        : [
+            ...headerStructure.subHeaders.filter((c) => !/purity/i.test(c)),
+            "Purity",
+          ];
+
+      backendHeaderStructure = {
+        ...headerStructure,
+        subHeaders: updatedSubHeaders,
+      };
+    }
+
+    const reportDate = getTodayDateString();
+
+    try {
+      const currentUser = getAuthUser();
+      const payload = {
+        name: cleanName,
+        type: cleanName,
+        source: "Spreadsheet Upload",
+        owner: currentUser?.name || currentUser?.email || "Unknown",
+        ownerRole: currentUser?.role || "User",
+        data: cleanBackendData,
+        headers: backendHeaders,
+        headerStructure: backendHeaderStructure,
+        createdAt: reportDate,
+      };
+
+      const checkRes = await authFetch("/api/reports/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const checkData = await checkRes.json();
+
+      if (checkData.exists) {
+        if (checkData.isSuperAdminProtected || checkData.isRoleProtected) {
+          const ownerName = checkData.existingReport?.owner || "User";
+          const ownerRoleName = checkData.existingReport?.ownerRole || "User";
+          const reportName = checkData.existingReport?.name || cleanName;
+          const msg =
+            checkData.message ||
+            checkData.error ||
+            `Upload Blocked: Report "${reportName}" was uploaded today by '${ownerName}' (${ownerRoleName}). Users belonging to a different role cannot overwrite or duplicate this report.`;
+
+          const modalTitle = checkData.isSuperAdminProtected
+            ? "Upload Blocked: Protected by Super Admin"
+            : `Upload Blocked: Protected by ${ownerRoleName}`;
+
+          setDuplicateModal({
+            isOpen: true,
+            title: modalTitle,
+            message: msg,
+            isSuperAdminProtected: Boolean(checkData.isSuperAdminProtected),
+            isRoleProtected: true,
+            payload,
+          });
+          toast(msg);
+          return;
+        }
+
+        if (checkData.isExactDuplicate || checkData.contentMatch) {
+          setDuplicateModal({
+            isOpen: true,
+            title: "Upload Blocked: Same-Day Duplicate Report",
+            message:
+              checkData.message ||
+              `Report "${cleanName}" has already been uploaded today with identical entries. Duplicate report upload is not allowed.`,
+            payload,
+          });
+          toast(
+            checkData.message ||
+              `Upload blocked: Report "${cleanName}" already exists today.`,
+          );
+          return;
+        }
+
+        if (checkData.hasEntryChanges) {
+          setDuplicateModal({
+            isOpen: true,
+            title: "Existing Report Found with Entry Changes",
+            message:
+              checkData.message ||
+              `Report "${cleanName}" already exists for today, but entry changes were detected. Would you like to update today's existing report?`,
+            payload,
+          });
+          toast(
+            `Existing report "${cleanName}" found for today with entry changes.`,
+          );
+          return;
+        }
+      }
+
+      const res = await authFetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+
+      if (data.success && data.data) {
+        if (reportDate) {
+          setStartDate(reportDate);
+          setEndDate(reportDate);
+        }
+
+        setSavedReports((prev) => [
+          data.data,
+          ...prev.filter(
+            (r) =>
+              (r._id || r.reportId) !== (data.data._id || data.data.reportId),
+          ),
+        ]);
+
+        if (data.isUpdated) {
+          backendMsg =
+            data.message ||
+            `Corrected entries for report "${cleanName}" updated successfully in today's report!`;
+        } else if (parsed.length <= 500) {
+          backendMsg = `Report "${cleanName}" uploaded and saved to backend!`;
+        }
+
+        await refreshAllData();
+        window.dispatchEvent(new Event("sg:report-uploaded"));
+      } else {
+        backendMsg = `Saving to backend failed${
+          data?.error ? `: ${data.error}` : ""
+        }`;
+      }
+    } catch {
+      backendMsg = `Saving to backend failed — check your connection and re-upload`;
+    }
+
+    toast(backendMsg);
+  };
+
+  const handleUpload = async (file?: File) => {
+    if (!file) return;
+    await applyWorkbook(await file.arrayBuffer(), file.name);
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
   const [deleteReportModalOpen, setDeleteReportModalOpen] = useState(false);
   const [deletingReport, setDeletingReport] = useState(false);
+  const [reportToDelete, setReportToDelete] = useState<ReportItem | null>(null);
 
   const [duplicateModal, setDuplicateModal] = useState<{
     isOpen: boolean;
@@ -3259,20 +4047,11 @@ export function DynamicReportViewer({
       });
       const data = await res.json();
       if (res.status === 403) {
-        toast(data.error || "Permission denied: Cannot overwrite Super Admin report.");
+        toast(
+          data.error ||
+            "Permission denied: Cannot overwrite Super Admin report.",
+        );
       } else if (data.success && data.data) {
-        if (duplicateModal.payload) {
-          setRows(duplicateModal.payload.data);
-          setActiveReportHeaders(duplicateModal.payload.headers);
-          if (duplicateModal.payload.headerStructure) {
-            setActiveHeaderStructure(duplicateModal.payload.headerStructure);
-          }
-          setFileName(duplicateModal.payload.name);
-          setSelectedReportId(data.data.reportId || data.data._id || "");
-          setViewMode("auto");
-        }
-        setReportId(data.data.reportId || data.data._id || "");
-        setActiveReportMeta(data.data);
         const msg =
           data.message ||
           (forceDup
@@ -3292,26 +4071,9 @@ export function DynamicReportViewer({
     }
   };
 
-  const handleDeleteReport = () => {
-    const targetId =
-      selectedReportId ||
-      reportId ||
-      activeReportMeta?._id ||
-      activeReportMeta?.reportId;
-    if (!targetId) {
-      setNotice("No report is currently loaded to delete.");
-      window.setTimeout(() => setNotice(""), 3000);
-      return;
-    }
-    setDeleteReportModalOpen(true);
-  };
-
   const confirmDeleteReport = async () => {
-    const targetId =
-      selectedReportId ||
-      reportId ||
-      activeReportMeta?._id ||
-      activeReportMeta?.reportId;
+    if (!reportToDelete) return;
+    const targetId = reportToDelete._id || reportToDelete.reportId;
     if (!targetId) return;
 
     setDeletingReport(true);
@@ -3321,129 +4083,23 @@ export function DynamicReportViewer({
       });
       const data = await res.json();
       if (data.success) {
-        setNotice(
+        toast(
           data.message ||
-            `Report '${fileName || activeReportMeta?.name || "Report"}' deleted successfully.`,
+            `Report '${reportToDelete.name || "Report"}' deleted successfully.`,
         );
-        window.setTimeout(() => setNotice(""), 4000);
-
-        setRows([]);
-        setSelectedReportId("");
-        setReportId("");
-        setFileName("");
-        setActiveReportMeta(null);
-        setActiveHeaderStructure(null);
-        setActiveReportHeaders([]);
-        setSelected([]);
-
-        await refreshAllData();
+        setReportToDelete(null);
+        setSelectedType("");
+        await refreshAllData(startDate, endDate, "");
       } else {
-        setNotice(data.error || "Failed to delete report.");
-        window.setTimeout(() => setNotice(""), 4000);
+        toast(data.error || "Failed to delete report.");
       }
     } catch (err) {
       console.error("Delete report error:", err);
-      setNotice("Error deleting report.");
-      window.setTimeout(() => setNotice(""), 4000);
+      toast("Error deleting report.");
     } finally {
       setDeletingReport(false);
       setDeleteReportModalOpen(false);
     }
-  };
-
-  const saveApprovalsToBackend = async () => {
-    const activeId = reportId || selectedReportId || "REP-CURRENT";
-    const currentUser = getAuthUser();
-    let backendMsg =
-      selected.length > 0
-        ? `${selected.length} row(s) saved with approval audit trail`
-        : "All approvals cleared.";
-
-    // Derive a meaningful rowId from the actual row data (first non-empty string col)
-    const idColumns = ["Party", "Name", "Description", "Item", "Particular", "TransNo", "Party Name"];
-    const getRowId = (row: Record<string, string>): string | undefined => {
-      for (const col of idColumns) {
-        const val = row[col]?.trim();
-        if (val) return val;
-      }
-      // Fallback: first non-empty, non-internal column
-      return Object.entries(row).find(
-        ([k, v]) => !k.startsWith("_") && v?.trim(),
-      )?.[1];
-    };
-
-    const selectedEntries = selected.map((idx) => {
-      const row = rows.find(
-        (r) => (r as any)._originalIndex === idx,
-      ) as Record<string, string> | undefined;
-      return {
-        rowIndex: idx,
-        rowId: row ? getRowId(row) : undefined,
-      };
-    });
-
-    try {
-      const res = await authFetch(`/api/reports/${activeId}/approvals`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selectedIndexes: selected,
-          selectedEntries,
-          approvedBy: currentUser?.name || currentUser?.email || "Unknown",
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.message) {
-        backendMsg = data.message;
-        loadSavedReports();
-      } else if (data.error) {
-        backendMsg = data.error;
-      }
-    } catch {
-      backendMsg =
-        "Failed to save approvals — check your connection and try again";
-    }
-
-    toast(backendMsg);
-  };
-
-
-  const exportFilteredRowsToXlsx = () => {
-    if (filteredRows.length === 0) {
-      toast("No data available to export");
-      return;
-    }
-    const exportCols = gridDisplayColumns;
-    const sanitizedExportData = filteredRows.map((r) => {
-      const copy: Record<string, any> = {};
-      exportCols.forEach((col) => {
-        if (/purity/i.test(col)) {
-          copy[col] = r[col] || calculateRowPurity(r, columns, undefined, rows);
-        } else {
-          copy[col] = r[col] ?? "";
-        }
-      });
-      return copy;
-    });
-    const worksheet = XLSX.utils.json_to_sheet(sanitizedExportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Filtered Report Data");
-
-    const cleanBase = (fileName || "report").toLowerCase().replace(/\s+/g, "-");
-    const outputFileName = `${cleanBase}-filtered.xlsx`;
-    XLSX.writeFile(workbook, outputFileName);
-    toast(`Exported ${filteredRows.length} rows to XLSX`);
-
-    authFetch("/api/audit-logs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        module: "Reports",
-        section: `Report ${fileName}`,
-        action: "Export XLSX",
-        details: `Exported ${filteredRows.length} records from report "${fileName}" to XLSX`,
-      }),
-    }).catch(() => {});
   };
 
   return (
@@ -3461,7 +4117,7 @@ export function DynamicReportViewer({
           </h1>
         </div>
 
-        {/* Upload & Actions */}
+        {/* Upload Button */}
         {permissions.add && (
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -3473,7 +4129,7 @@ export function DynamicReportViewer({
             />
             <button
               onClick={() => inputRef.current?.click()}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#18476A] px-4 text-xs font-semibold text-white shadow-lg shadow-[#18476A]/20 transition hover:bg-[#123955]"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#18476A] px-4 text-xs font-semibold text-white shadow-lg shadow-[#18476A]/20 transition hover:bg-[#123955] cursor-pointer"
             >
               <Upload size={15} />
               Upload spreadsheet
@@ -3482,7 +4138,7 @@ export function DynamicReportViewer({
         )}
       </div>
 
-      {/* ── Toast Notification Banner ── */}
+      {/* Toast Notification Banner */}
       {notice && (
         <div className="mb-4 flex items-center gap-2 rounded-xl bg-[#18476A] px-4 py-3 text-xs font-semibold text-white shadow-md animate-in fade-in slide-in-from-top-1">
           <Sparkles size={16} className="text-amber-300" />
@@ -3490,862 +4146,159 @@ export function DynamicReportViewer({
         </div>
       )}
 
-      {/* ── Main Data Viewer Container ── */}
-      <div className="rounded-2xl border border-slate-200/80 bg-white shadow-xl">
-        {/* Controls Toolbar */}
-        <div className="flex flex-col justify-between gap-4 border-b border-slate-100 p-4 sm:p-5 lg:flex-row lg:items-center">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">
-              {fileName ? fileName : "Report Viewer"}
-            </h3>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Dynamic Date-wise Report Type Filter Dropdown */}
-            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/90 px-2.5 py-1">
-              <Filter size={12} className="text-slate-400" />
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Report Type:
-              </span>
-              <select
-                value={selectedType}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedType(val);
-                  if (val) {
-                    const rep = savedReports.find(
-                      (r) =>
-                        r.name === val ||
-                        r.type === val ||
-                        (r._id || r.reportId) === val,
-                    );
-                    if (rep) selectReport(rep);
-                  }
-                }}
-                className="h-7 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#8fc3e0]"
-              >
-                <option value="">
-                  All Types ({availableReportTypes.length})
-                </option>
-                {availableReportTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Date Range Filter */}
-            <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/80 p-1">
-              <div className="flex items-center gap-1 px-1.5 text-xs text-slate-500 font-medium">
-                <span className="text-[10px] uppercase font-bold text-slate-400">
-                  FROM
-                </span>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-[#8fc3e0]"
-                  title="From Date"
-                />
-              </div>
-              <div className="flex items-center gap-1 px-1.5 text-xs text-slate-500 font-medium">
-                <span className="text-[10px] uppercase font-bold text-slate-400">
-                  TO
-                </span>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-700 outline-none focus:border-[#8fc3e0]"
-                  title="To Date"
-                />
-              </div>
-              {(startDate || endDate) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStartDate("");
-                    setEndDate("");
-                  }}
-                  title="Clear Date Range Filter"
-                  className="grid h-6 w-6 place-items-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition"
-                >
-                  <X size={13} />
-                </button>
-              )}
-            </div>
-
-            {/* Export XLSX Button */}
-            {permissions.export && (
-              <button
-                onClick={exportFilteredRowsToXlsx}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 hover:bg-emerald-100 hover:border-emerald-400 transition shadow-xs"
-                title="Export filtered data to Excel XLSX"
-              >
-                <FileSpreadsheet size={14} className="text-emerald-700" />
-                Export XLSX
-              </button>
-            )}
-
-            {/* Single Report Delete Button */}
-            {permissions.delete && (
-              <button
-                type="button"
-                disabled={!(selectedReportId || reportId || activeReportMeta)}
-                onClick={handleDeleteReport}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold transition shadow-xs ${
-                  selectedReportId || reportId || activeReportMeta
-                    ? "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-400 cursor-pointer"
-                    : "border-slate-200 bg-slate-50 text-slate-400 opacity-60 cursor-not-allowed"
-                }`}
-                title={
-                  selectedReportId || reportId || activeReportMeta
-                    ? `Delete entire report "${fileName || activeReportMeta?.name || ""}"`
-                    : "No active report selected to delete"
-                }
-              >
-                <Trash2
-                  size={14}
-                  className={
-                    selectedReportId || reportId || activeReportMeta
-                      ? "text-rose-600"
-                      : "text-slate-400"
-                  }
-                />
-                Delete Report
-              </button>
-            )}
-
-            {/* Refresh Button */}
-            <button
-              onClick={async () => {
-                await refreshAllData();
-                if (activeReportMeta) {
-                  selectReport(activeReportMeta);
-                }
-              }}
-              title="Refresh report data"
-              className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition shadow-xs"
-            >
-              <RefreshCw
-                size={14}
-                className={loadingReports ? "animate-spin text-[#18476A]" : ""}
-              />
-            </button>
-          </div>
+      {/* Controls Bar: Report Type Filter & Date Range Filter */}
+      <div className="mb-6 flex flex-col justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-sm lg:flex-row lg:items-center">
+        <div className="flex items-center gap-2">
+          <FileSpreadsheet className="text-[#18476A]" size={20} />
+          <h2 className="text-base font-bold text-slate-900">
+            Reports ({savedReports.length})
+          </h2>
         </div>
 
-        {/* ── Active View Rendering ── */}
-        {rows.length === 0 ? (
-          <div className="p-12 text-center">
-            <div className="mx-auto mb-3.5 grid h-14 w-14 place-items-center rounded-2xl bg-slate-100/80 text-slate-400">
-              <FileSpreadsheet size={28} />
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Dynamic Date-wise Report Type Filter Dropdown */}
+          <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/90 px-2.5 py-1">
+            <Filter size={12} className="text-slate-400" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Report Type:
+            </span>
+            <select
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+              className="h-7 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#8fc3e0]"
+            >
+              <option value="">
+                All Reports ({availableReportTypes.length})
+              </option>
+              {availableReportTypes.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Date Range Filter */}
+          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/80 p-1">
+            <div className="flex items-center gap-1 px-1.5 text-xs text-slate-500 font-medium">
+              <span className="text-[10px] uppercase font-bold text-slate-400">
+                FROM
+              </span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-[#8fc3e0]"
+                title="From Date"
+              />
             </div>
-            <h3 className="text-base font-bold text-slate-800">
-              {fileName
-                ? `No data available in "${fileName}"`
-                : (startDate || endDate)
-                ? "No reports found for the selected date range"
-                : "No report dataset selected"}
-            </h3>
-            <p className="mx-auto mt-1.5 mb-5 max-w-sm text-xs text-slate-500">
-              {(startDate || endDate)
-                ? "Try adjusting your FROM and TO date filters or clear the date filter."
-                : "Select a report from the dropdown above or upload a spreadsheet file to view report data."}
-            </p>
-            {permissions.add && (
+            <div className="flex items-center gap-1 px-1.5 text-xs text-slate-500 font-medium">
+              <span className="text-[10px] uppercase font-bold text-slate-400">
+                TO
+              </span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-700 outline-none focus:border-[#8fc3e0]"
+                title="To Date"
+              />
+            </div>
+            {(startDate || endDate) && (
               <button
                 type="button"
-                onClick={() => inputRef.current?.click()}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#18476A] px-5 text-xs font-semibold text-white shadow-md shadow-[#18476A]/20 hover:bg-[#123955] transition"
+                onClick={() => {
+                  setStartDate("");
+                  setEndDate("");
+                }}
+                title="Clear Date Range Filter"
+                className="grid h-6 w-6 place-items-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition cursor-pointer"
               >
-                <Upload size={15} />
-                Upload spreadsheet file
+                <X size={13} />
               </button>
             )}
           </div>
-        ) : (
-          <>
-            {/* 1. Side-by-Side Financial Ledger View */}
-            {effectiveViewMode === "ledger" && (
-              <div>
-                {visibleGridRows.some((r) => r._isModified) && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/95 border border-amber-300/80 p-3 px-4 text-xs text-amber-900 rounded-xl mb-3 shadow-2xs animate-in fade-in">
-                    <div className="flex items-center gap-2 font-medium">
-                      <div className="grid h-6 w-6 place-items-center rounded-lg bg-amber-200/90 text-amber-800 shrink-0">
-                        <Sparkles size={14} />
-                      </div>
-                      <span>
-                        <strong>Modified Entry Data Detected:</strong> Highlighted ledger rows contain updated values from a recent upload. Hover over highlighted cells to view original (old) vs updated (new) values.
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 font-bold text-[11px] bg-amber-200/90 text-amber-900 px-2.5 py-1 rounded-lg border border-amber-300 shadow-2xs shrink-0">
-                      <RefreshCw size={12} className="text-amber-700 animate-spin-slow" />
-                      {visibleGridRows.filter((r) => r._isModified).length} Modified Entries
-                    </div>
-                  </div>
-                )}
-                <LedgerTableView
-                  rows={visibleGridRows}
-                  columns={columns}
-                  transactionKey={transactionKey!}
-                  typeKey={typeKey!}
-                  amountKey={amountKey!}
-                  selected={selected}
-                  toggleApproval={toggleApproval}
-                  getRelatedGroupIndices={getRelatedGroupIndices}
-                  rowGroupMeta={rowGroupMeta}
-                  entryColorPalette={entryColorPalette}
-                  canDelete={false}
-                />
-              </div>
-            )}
 
-            {/* 2. Standard Tabular Grid View */}
-            {effectiveViewMode === "grid" && (
-              <div className="max-h-[750px] xl:max-h-[calc(100vh-230px)] overflow-auto">
-                {visibleGridRows.some((r) => r._isModified) && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/95 border border-amber-300/80 p-3 px-4 text-xs text-amber-900 rounded-xl mb-3 shadow-2xs animate-in fade-in">
-                    <div className="flex items-center gap-2 font-medium">
-                      <div className="grid h-6 w-6 place-items-center rounded-lg bg-amber-200/90 text-amber-800 shrink-0">
-                        <Sparkles size={14} />
-                      </div>
-                      <span>
-                        <strong>Modified Entry Data Detected:</strong> Highlighted rows contain updated values from a recent upload. Hover over highlighted cells to view original (old) vs updated (new) values.
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 font-bold text-[11px] bg-amber-200/90 text-amber-900 px-2.5 py-1 rounded-lg border border-amber-300 shadow-2xs shrink-0">
-                      <RefreshCw size={12} className="text-amber-700 animate-spin-slow" />
-                      {visibleGridRows.filter((r) => r._isModified).length} Modified Entries
-                    </div>
-                  </div>
-                )}
-                <table className="w-full min-w-[900px] border-separate border-spacing-0 text-left">
-                  {activeHeaderStructure &&
-                  activeHeaderStructure.isMultiLevel &&
-                  ((activeHeaderStructure.levels &&
-                    activeHeaderStructure.levels.length > 0) ||
-                    activeHeaderStructure.mainHeaders.length > 0) ? (
-                    <thead className="sticky top-0 z-20 bg-[#18476A] font-sans text-xs border-b border-white/40 shadow-sm">
-                      {activeHeaderStructure.levels &&
-                      activeHeaderStructure.levels.length > 0 ? (
-                        <>
-                          {activeHeaderStructure.levels.map((lvl, lIdx) => {
-                            const displayGroups = buildDisplayHeaderGroups(
-                              lvl.groups,
-                              gridDisplayColumns,
-                            );
-
-                            return (
-                              <tr
-                                key={lIdx}
-                                className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider border-b border-white/20"
-                              >
-                                {lIdx === 0 && (
-                                  <th
-                                    rowSpan={
-                                      activeHeaderStructure.levels!.length + 1
-                                    }
-                                    className="sticky left-0 z-30 bg-[#18476A] px-4 py-2.5 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle text-center"
-                                  >
-                                    <div className="flex items-center justify-center gap-2 whitespace-nowrap">
-                                      <button
-                                        type="button"
-                                        onClick={toggleSelectAll}
-                                        className={`grid h-4 w-4 place-items-center rounded border transition ${
-                                          selected.length ===
-                                            visibleGridRows.length &&
-                                          visibleGridRows.length > 0
-                                            ? "border-emerald-400 bg-emerald-500 text-white"
-                                            : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
-                                        }`}
-                                        title="Toggle Select All"
-                                      >
-                                        <Check size={11} strokeWidth={3} />
-                                      </button>
-                                      <span className="text-white font-bold text-xs whitespace-nowrap">
-                                        APPROVE
-                                      </span>
-                                    </div>
-                                  </th>
-                                )}
-                                {displayGroups.map((grp, gIdx) => (
-                                  <th
-                                    key={gIdx}
-                                    colSpan={grp.colSpan}
-                                    rowSpan={grp.rowSpan || 1}
-                                    className="px-3.5 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] uppercase tracking-wider text-xs whitespace-nowrap align-middle"
-                                  >
-                                    {grp.title}
-                                  </th>
-                                ))}
-                              </tr>
-                            );
-                          })}
-
-                          {/* Header Row: Sub Header Labels */}
-                          <tr className="bg-[#18476A] text-white font-bold text-xs">
-                            {gridDisplayColumns.map((colKey, idx) => {
-                              const displayLabel = colKey.replace(
-                                /\s*\(\d+\)$/,
-                                "",
-                              );
-                              const isNum =
-                                /pieces|weight|wt|fine|amt|amount|price|credit|debit|purity/i.test(
-                                  colKey,
-                                );
-                              return (
-                                <th
-                                  key={idx}
-                                  className={`px-3.5 py-2.5 border-r border-b border-white/40 font-bold text-white whitespace-nowrap text-xs align-middle ${
-                                    isNum ? "text-right" : "text-left"
-                                  }`}
-                                >
-                                  {displayLabel}
-                                </th>
-                              );
-                            })}
-                          </tr>
-                        </>
-                      ) : (
-                        <tr className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider">
-                          <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle">
-                            <div className="flex items-center gap-2 whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={toggleSelectAll}
-                                className={`grid h-4 w-4 place-items-center rounded border transition ${
-                                  selected.length === visibleGridRows.length &&
-                                  visibleGridRows.length > 0
-                                    ? "border-emerald-400 bg-emerald-500 text-white"
-                                    : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
-                                }`}
-                                title="Toggle Select All"
-                              >
-                                <Check size={11} strokeWidth={3} />
-                              </button>
-                              <span className="text-white font-bold text-xs whitespace-nowrap">
-                                APPROVE
-                              </span>
-                            </div>
-                          </th>
-                          {(() => {
-                            const displayGroups = buildDisplayHeaderGroups(
-                              activeHeaderStructure.mainHeaders,
-                              gridDisplayColumns,
-                            );
-                            return (
-                              <>
-                                {displayGroups.map((grp, idx) => (
-                                  <th
-                                    key={idx}
-                                    colSpan={grp.colSpan}
-                                    className="px-3.5 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] uppercase tracking-wider text-xs whitespace-nowrap align-middle"
-                                  >
-                                    {grp.title}
-                                  </th>
-                                ))}
-                              </>
-                            );
-                          })()}
-                        </tr>
-                      )}
-                    </thead>
-                  ) : headerLayoutMode === "melting" ? (
-                    <thead className="sticky top-0 z-20 bg-[#18476A] font-sans text-xs border-b border-white/40 shadow-sm">
-                      {/* Header Row 1: [B] IN | [C] OUT Grouping */}
-                      <tr className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider">
-                        <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle">
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={toggleSelectAll}
-                              className={`grid h-4 w-4 place-items-center rounded border transition ${
-                                selected.length === visibleGridRows.length &&
-                                visibleGridRows.length > 0
-                                  ? "border-emerald-400 bg-emerald-500 text-white"
-                                  : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
-                              }`}
-                              title="Toggle Select All"
-                            >
-                              <Check size={11} strokeWidth={3} />
-                            </button>
-                            <span className="text-white font-bold text-xs whitespace-nowrap">
-                              APPROVE
-                            </span>
-                          </div>
-                        </th>
-                        {baseColsCount > 0 && (
-                          <th
-                            colSpan={baseColsCount}
-                            className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"
-                          ></th>
-                        )}
-                        <th
-                          colSpan={inSpanCount}
-                          className="px-4 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] whitespace-nowrap align-middle"
-                        >
-                          [B] IN
-                        </th>
-                        {purityColIndex !== -1 && (
-                          <th className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"></th>
-                        )}
-                        <th
-                          colSpan={outSpanCount}
-                          className="px-4 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] whitespace-nowrap align-middle"
-                        >
-                          [C] OUT
-                        </th>
-                        {trailingColsCount > 0 && (
-                          <th
-                            colSpan={trailingColsCount}
-                            className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"
-                          ></th>
-                        )}
-                      </tr>
-
-                      {/* Header Row 2: Column Header Labels */}
-                      <tr className="bg-[#18476A] text-white font-bold text-xs">
-                        <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 text-white text-left whitespace-nowrap align-middle">
-                          #
-                        </th>
-                        {meltingColumns.map((colName, idx) => {
-                          const displayLabel = colName.replace(
-                            /\s*\(\d+\)$/,
-                            "",
-                          );
-                          const isNum =
-                            /pieces|weight|wt|fine|amt|amount|price|credit|debit/i.test(
-                              colName,
-                            );
-                          return (
-                            <th
-                              key={idx}
-                              className={`px-3.5 py-2 border-r border-b border-white/40 font-bold text-white whitespace-nowrap text-xs align-middle ${
-                                isNum ? "text-right" : "text-left"
-                              }`}
-                            >
-                              {displayLabel}
-                            </th>
-                          );
-                        })}
-                      </tr>
-                    </thead>
-                  ) : (
-                    <thead className="sticky top-0 z-10">
-                      <tr className="bg-[#18476A] text-[10.5px] font-bold uppercase tracking-[0.08em] text-white">
-                        <th className="sticky left-0 bg-[#18476A] px-5 py-3.5 border-b border-r border-white/20 text-white whitespace-nowrap align-middle">
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={toggleSelectAll}
-                              className={`grid h-4 w-4 place-items-center rounded border transition ${
-                                selected.length === visibleGridRows.length &&
-                                visibleGridRows.length > 0
-                                  ? "border-emerald-400 bg-emerald-500 text-white"
-                                  : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
-                              }`}
-                            >
-                              <Check size={11} strokeWidth={3} />
-                            </button>
-                            <span className="text-white font-bold whitespace-nowrap">
-                              Approve
-                            </span>
-                          </div>
-                        </th>
-                        {columns.map((column) => {
-                          const displayLabel = column.replace(
-                            /\s*\(\d+\)$/,
-                            "",
-                          );
-                          return (
-                            <th
-                              key={column}
-                              className="border-b border-r border-white/20 bg-[#18476A] px-5 py-3.5 font-bold text-white whitespace-nowrap align-middle"
-                            >
-                              {displayLabel}
-                            </th>
-                          );
-                        })}
-                      </tr>
-                    </thead>
-                  )}
-                  <tbody>
-                    {visibleGridRows.map((row, index) => {
-                      const origIndex =
-                        typeof row._originalIndex === "number"
-                          ? (row._originalIndex as number)
-                          : index;
-                      const groupIndices = getRelatedGroupIndices(origIndex);
-                      const isRowApproved = selected.includes(origIndex);
-
-                      const meta = rowGroupMeta.get(origIndex);
-                      const groupId = meta?.groupId ?? index;
-                      const band = getEntryBandStyle(
-                        groupId,
-                        entryColorPalette,
-                      );
-
-                      const prevRow =
-                        index > 0 ? visibleGridRows[index - 1] : null;
-                      const prevOrigIndex = prevRow
-                        ? typeof prevRow._originalIndex === "number"
-                          ? (prevRow._originalIndex as number)
-                          : index - 1
-                        : null;
-                      const prevMeta =
-                        prevOrigIndex !== null
-                          ? rowGroupMeta.get(prevOrigIndex)
-                          : null;
-                      const isNewEntryStart =
-                        index === 0 ||
-                        (prevMeta && prevMeta.groupId !== groupId);
-
-                      const nextRow =
-                        index < visibleGridRows.length - 1
-                          ? visibleGridRows[index + 1]
-                          : null;
-                      const nextOrigIndex = nextRow
-                        ? typeof nextRow._originalIndex === "number"
-                          ? (nextRow._originalIndex as number)
-                          : index + 1
-                        : null;
-                      const nextMeta =
-                        nextOrigIndex !== null
-                          ? rowGroupMeta.get(nextOrigIndex)
-                          : null;
-                      const isLastRowOfEntry =
-                        index === visibleGridRows.length - 1 ||
-                        !nextMeta ||
-                        nextMeta.groupId !== groupId;
-
-                      const user = getAuthUser();
-                      const currentUserName =
-                        user?.name || user?.email?.split("@")[0] || "BHAVESH";
-
-                      const isRowModified = Boolean(row._isModified);
-                      const isNewRowEntry = Boolean(row._isNewEntry);
-
-                      return (
-                        <tr
-                          key={origIndex}
-                          className={`transition-colors duration-150 ${
-                            isRowApproved
-                              ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
-                              : isRowModified
-                                ? "bg-amber-50/90 hover:bg-amber-100/90 border-l-4 border-l-amber-500 shadow-2xs"
-                                : isNewRowEntry
-                                  ? "bg-emerald-50/80 hover:bg-emerald-100/80 border-l-4 border-l-emerald-500"
-                                  : `${band.base} ${band.hover}`
-                          } ${
-                            isNewEntryStart && index > 0
-                              ? "border-t-2 border-slate-300/80 shadow-[0_-1px_0_rgba(0,0,0,0.04)]"
-                              : "border-b border-slate-100"
-                          }`}
-                        >
-                          <td
-                            className={`sticky left-0 border-r border-b border-slate-100 bg-inherit px-4 py-2.5 whitespace-nowrap align-middle ${
-                              !isRowApproved && entryColorPalette !== "none"
-                                ? band.border
-                                : ""
-                            }`}
-                          >
-                            <div className="flex flex-col items-start gap-1 whitespace-nowrap">
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleApproval(origIndex)}
-                                  title={
-                                    isRowApproved
-                                      ? `Row #${origIndex + 1} Selected - click to deselect`
-                                      : `Select Row #${origIndex + 1}`
-                                  }
-                                  className={`grid h-5 w-5 place-items-center rounded border transition ${
-                                    isRowApproved
-                                      ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
-                                      : "border-slate-300 bg-white text-transparent hover:border-slate-400"
-                                  }`}
-                                >
-                                  {isRowApproved ? (
-                                    <Check size={13} strokeWidth={3} />
-                                  ) : (
-                                    <Check size={13} strokeWidth={3} />
-                                  )}
-                                </button>
-                              </div>
-                              {isRowApproved && (
-                                <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
-                                  By - {currentUserName}
-                                </span>
-                              )}
-                              {isNewEntryStart && isRowModified && (
-                                <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
-                                  <RefreshCw size={9} className="text-amber-700 animate-spin-slow" /> Modified
-                                </span>
-                              )}
-                              {isNewEntryStart && isNewRowEntry && (
-                                <span className="inline-flex items-center gap-1 rounded bg-emerald-100/90 border border-emerald-300 px-1 py-0.5 text-[9px] font-bold text-emerald-900 whitespace-nowrap shadow-2xs mt-0.5">
-                                  <Sparkles size={9} className="text-emerald-700" /> New Entry
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {gridDisplayColumns.map((column) => {
-                            const isPurityCol =
-                              isMelting && /purity/i.test(column);
-                            const rawRowPurity = String(
-                              row[column] ?? "",
-                            ).trim();
-                            const hasRowPurity =
-                              rawRowPurity !== "" &&
-                              rawRowPurity !== "—" &&
-                              rawRowPurity !== "-" &&
-                              rawRowPurity.toLowerCase() !== "null" &&
-                              rawRowPurity.toLowerCase() !== "undefined" &&
-                              rawRowPurity !== "0.00%" &&
-                              rawRowPurity !== "0%" &&
-                              rawRowPurity !== "0";
-
-                            const purityValue = isPurityCol
-                              ? hasRowPurity
-                                ? rawRowPurity.includes("%") ||
-                                  isNaN(Number(rawRowPurity.replace(/%/g, "")))
-                                  ? rawRowPurity
-                                  : `${Number(rawRowPurity.replace(/%/g, "")).toFixed(2)}%`
-                                : calculateRowPurity(
-                                    row,
-                                    columns,
-                                    groupIndices,
-                                    rows,
-                                  )
-                              : "";
-                            const isNum =
-                              /pieces|weight|wt|fine|amt|amount|price|credit|debit|purity/i.test(
-                                column,
-                              );
-
-                            const fieldDiff = (row._diff as Record<string, { old: unknown; new: unknown }> | undefined)?.[column];
-
-                            const baseValNode = isPurityCol ? (
-                              isNewEntryStart &&
-                              purityValue !== "—" &&
-                              purityValue !== "" ? (
-                                <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200 shadow-xs whitespace-nowrap">
-                                  {purityValue}
-                                </span>
-                              ) : (
-                                "—"
-                              )
-                            ) : column === typeKey ? (
-                              <span
-                                className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${
-                                  /debit/i.test(row[column])
-                                    ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                    : /credit/i.test(row[column])
-                                      ? "bg-teal-50 text-teal-700 border border-teal-200"
-                                      : "bg-slate-100 text-slate-700"
-                                }`}
-                              >
-                                {row[column]}
-                              </span>
-                            ) : (
-                              row[column] || "—"
-                            );
-
-                            if (fieldDiff) {
-                              return (
-                                <td
-                                  key={column}
-                                  className={`border-b border-l border-slate-100 px-3 py-2 text-xs font-medium whitespace-nowrap align-middle bg-amber-100/40 ${
-                                    isNum ? "text-right font-mono" : "text-left"
-                                  }`}
-                                >
-                                  <div className="group relative inline-flex items-center gap-1.5 justify-end w-full">
-                                    <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 px-2 py-0.5 font-bold text-amber-950 border border-amber-300 shadow-2xs">
-                                      {baseValNode}
-                                      <span className="h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse" />
-                                    </span>
-                                    {/* Popover on hover showing Old vs New value */}
-                                    <div className="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:flex flex-col gap-1.5 rounded-xl bg-slate-900 p-2.5 text-[11px] text-white shadow-2xl z-50 whitespace-nowrap border border-slate-700 animate-in fade-in zoom-in-95">
-                                      <div className="flex items-center gap-1 font-bold text-amber-400 border-b border-slate-800 pb-1">
-                                        <Sparkles size={12} /> Entry Value Changed
-                                      </div>
-                                      <div className="flex items-center gap-2 text-slate-300">
-                                        <span className="text-slate-400 font-medium">Original (Old):</span>
-                                        <span className="line-through text-rose-300 font-mono font-bold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800/60">
-                                          {String(fieldDiff.old ?? "—")}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-2 text-slate-100">
-                                        <span className="text-slate-400 font-medium">Updated (New):</span>
-                                        <span className="text-emerald-300 font-mono font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
-                                          {String(fieldDiff.new ?? row[column] ?? "—")}
-                                        </span>
-                                      </div>
-                                      {row._modifiedBy && (
-                                        <div className="text-[9.5px] text-slate-400 border-t border-slate-800 pt-1 mt-0.5">
-                                          Modified by {String(row._modifiedBy)}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </td>
-                              );
-                            }
-
-                            return (
-                              <td
-                                key={column}
-                                className={`border-b border-l border-slate-100 px-4 py-2.5 text-xs font-medium whitespace-nowrap align-middle ${
-                                  isNum ? "text-right font-mono" : "text-left"
-                                } ${
-                                  isPurityCol
-                                    ? "font-bold text-emerald-900"
-                                    : "text-slate-700"
-                                }`}
-                              >
-                                {baseValNode}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  {Object.keys(grandTotals).length > 0 && (
-                    <tfoot>
-                      <tr className="sticky bottom-0 border-t-2 border-[#123955] bg-[#18476A] text-white">
-                        <td className="sticky left-0 z-30 bg-[#18476A] px-4 py-3 text-xs font-bold whitespace-nowrap min-w-[140px] align-middle border-r border-white/20">
-                          Grand Total ({visibleGridRows.length} entries)
-                        </td>
-                        {gridDisplayColumns.map((column) => {
-                          const isPurityCol =
-                            isMelting && /purity/i.test(column);
-                          return (
-                            <td
-                              key={column}
-                              className="border-l border-white/10 px-4 py-3 text-right text-xs font-bold whitespace-nowrap align-middle font-mono"
-                            >
-                              {isPurityCol
-                                ? grandTotalPurity
-                                : numericColumnsForTotals.includes(column)
-                                  ? (grandTotals[column] ?? 0).toLocaleString(
-                                      "en-IN",
-                                      {
-                                        minimumFractionDigits: Number.isInteger(
-                                          grandTotals[column] ?? 0,
-                                        )
-                                          ? 0
-                                          : /wt|weight|fine/i.test(column)
-                                            ? 3
-                                            : 2,
-                                        maximumFractionDigits: 3,
-                                      },
-                                    )
-                                  : ""}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-                {visibleGridRows.length === 0 && (
-                  <div className="p-12 text-center text-sm text-slate-400">
-                    No matching rows found in this report. Try resetting your
-                    query or filters.
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 3. Analytics View */}
-            {effectiveViewMode === "analytics" && (
-              <div className="p-6">
-                <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
-                  <PieChart size={16} className="text-[#18476A]" />
-                  Report Data Breakdown &amp; Distribution
-                </h4>
-                <div className="grid gap-4 sm:grid-cols-3 mb-6">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-                    <span className="text-xs text-slate-500 font-semibold">
-                      Total Records
-                    </span>
-                    <p className="mt-1 text-2xl font-bold text-slate-900">
-                      {filteredRows.length}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-                    <span className="text-xs text-slate-500 font-semibold">
-                      Approved Records
-                    </span>
-                    <p className="mt-1 text-2xl font-bold text-emerald-600">
-                      {selected.length} (
-                      {filteredRows.length
-                        ? Math.round(
-                            (selected.length / filteredRows.length) * 100,
-                          )
-                        : 0}
-                      %)
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-                    <span className="text-xs text-slate-500 font-semibold">
-                      Detected Fields
-                    </span>
-                    <p className="mt-1 text-2xl font-bold text-[#18476A]">
-                      {columns.length}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
-                  <h5 className="text-xs font-bold text-slate-700 mb-3">
-                    Detected Columns Catalog
-                  </h5>
-                  <div className="flex flex-wrap gap-2">
-                    {columns.map((col) => (
-                      <span
-                        key={col}
-                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700"
-                      >
-                        {col}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-
-
-            {/* Footer & Approval Action */}
-            <div className="flex flex-col justify-between gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:px-6">
-              <p className="text-[11px] text-slate-400">
-                Showing{" "}
-                <span className="font-semibold text-slate-600">
-                  {filteredRows.length}
-                </span>{" "}
-                of {rows.length} rows ·{" "}
-                <span className="font-semibold text-emerald-600">
-                  {selected.length} marked approved
-                </span>
-              </p>
-              <button
-                type="button"
-                onClick={saveApprovalsToBackend}
-                disabled={selected.length === 0}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Check size={15} />
-                Save {selected.length} Approved Entries
-              </button>
-            </div>
-          </>
-        )}
+          {/* Refresh Button */}
+          <button
+            onClick={async () => {
+              await refreshAllData();
+            }}
+            title="Refresh report data"
+            className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition shadow-2xs cursor-pointer"
+          >
+            <RefreshCw
+              size={14}
+              className={loadingReports ? "animate-spin text-[#18476A]" : ""}
+            />
+          </button>
+        </div>
       </div>
+
+      {/* Reports List */}
+      {loadingReports ? (
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-12 text-center text-slate-500 flex items-center justify-center gap-2.5 shadow-xl">
+          <RefreshCw size={20} className="animate-spin text-[#18476A]" />
+          <span className="text-sm font-semibold">Loading reports...</span>
+        </div>
+      ) : displayedReports.length === 0 ? (
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-12 text-center shadow-xl">
+          <div className="mx-auto mb-3.5 grid h-14 w-14 place-items-center rounded-2xl bg-slate-100/80 text-slate-400">
+            <FileSpreadsheet size={28} />
+          </div>
+          <h3 className="text-base font-bold text-slate-800">
+            {selectedType
+              ? `No reports found for type "${selectedType}"`
+              : startDate || endDate
+              ? "No reports found for the selected date range"
+              : "No report dataset available"}
+          </h3>
+          <p className="mx-auto mt-1.5 mb-5 max-w-sm text-xs text-slate-500">
+            {selectedType
+              ? "Try selecting 'All Reports' from the report type dropdown."
+              : startDate || endDate
+              ? "Try adjusting your FROM and TO date filters or clear the date filter."
+              : "Select a report type from the dropdown filter or upload a spreadsheet file."}
+          </p>
+          {selectedType ? (
+            <button
+              type="button"
+              onClick={() => setSelectedType("")}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#18476A] px-5 text-xs font-semibold text-white shadow-md shadow-[#18476A]/20 hover:bg-[#123955] transition cursor-pointer"
+            >
+              View All Reports
+            </button>
+          ) : permissions.add ? (
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#18476A] px-5 text-xs font-semibold text-white shadow-md shadow-[#18476A]/20 hover:bg-[#123955] transition cursor-pointer"
+            >
+              <Upload size={15} />
+              Upload spreadsheet file
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {displayedReports.map((report) => (
+            <SingleReportCard
+              key={report._id || report.reportId}
+              report={report}
+              permissions={permissions}
+              query={query}
+              entryColorPalette={entryColorPalette}
+              headerLayoutMode={headerLayoutMode}
+              onRequestDelete={(r) => {
+                setReportToDelete(r);
+                setDeleteReportModalOpen(true);
+              }}
+              toast={toast}
+              refreshAllData={refreshAllData}
+            />
+          ))}
+        </div>
+      )}
 
       {/* ── Report Delete Confirmation Modal ── */}
       {deleteReportModalOpen && (
@@ -4360,14 +4313,14 @@ export function DynamicReportViewer({
                   Delete Entire Report
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {fileName || activeReportMeta?.name || "Selected Report"}
+                  {reportToDelete?.name || "Selected Report"}
                 </p>
               </div>
             </div>
             <p className="text-xs text-slate-600 mb-5 leading-relaxed">
               Are you sure you want to permanently delete the report{" "}
               <strong className="text-slate-900 font-semibold">
-                "{fileName || activeReportMeta?.name || "this report"}"
+                "{reportToDelete?.name || "this report"}"
               </strong>
               ? This action will remove the entire report document from the
               system.
@@ -4376,8 +4329,11 @@ export function DynamicReportViewer({
               <button
                 type="button"
                 disabled={deletingReport}
-                onClick={() => setDeleteReportModalOpen(false)}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+                onClick={() => {
+                  setDeleteReportModalOpen(false);
+                  setReportToDelete(null);
+                }}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
               >
                 Cancel
               </button>
@@ -4385,7 +4341,7 @@ export function DynamicReportViewer({
                 type="button"
                 disabled={deletingReport}
                 onClick={confirmDeleteReport}
-                className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 shadow-md shadow-rose-600/20 transition flex items-center gap-2"
+                className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 shadow-md shadow-rose-600/20 transition flex items-center gap-2 cursor-pointer"
               >
                 {deletingReport ? (
                   <>
@@ -4440,21 +4396,21 @@ export function DynamicReportViewer({
                 }
                 className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
               >
-                {duplicateModal.isRoleProtected ? "Close / Cancel Upload" : "Cancel Upload"}
+                Close
               </button>
               {!duplicateModal.isRoleProtected && (
                 <button
                   type="button"
                   disabled={submittingOverwrite}
                   onClick={() => handleConfirmOverwrite(false)}
-                  className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 shadow-md shadow-amber-600/20 transition flex items-center gap-1.5 cursor-pointer"
+                  className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 shadow-md shadow-rose-600/20 transition flex items-center gap-1.5 cursor-pointer"
                 >
                   {submittingOverwrite ? (
                     <>
                       <RefreshCw size={13} className="animate-spin" /> Updating...
                     </>
                   ) : (
-                    "Update Today's Existing Report"
+                    "Update Today's Report"
                   )}
                 </button>
               )}
