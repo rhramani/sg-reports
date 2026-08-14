@@ -1,9 +1,14 @@
 import { UserSession } from "@shared/api";
 import { secureLocalStorage } from "./secureStorage";
 
-export const AUTH_TOKEN_KEY = "nexora-token";
-export const AUTH_USER_KEY = "nexora-user";
-export const AUTH_FLAG_KEY = "nexora-auth";
+export const AUTH_TOKEN_KEY = "sgreport-token";
+export const AUTH_USER_KEY = "sgreport-user";
+export const AUTH_FLAG_KEY = "sgreport-auth";
+export const TOKEN_EXPIRY_HOURS = Number(import.meta.env?.VITE_TOKEN_EXPIRY_HOURS) || 24;
+export const TOKEN_EXPIRY_MS = TOKEN_EXPIRY_HOURS * 60 * 60 * 1000;
+
+
+
 
 export interface ParsedJwtPayload {
   email?: string;
@@ -115,12 +120,26 @@ export function setAuthSession(token: string, user: UserSession) {
   secureLocalStorage.setItem(AUTH_TOKEN_KEY, token);
   secureLocalStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
   secureLocalStorage.setItem(AUTH_FLAG_KEY, "true");
+
+  if (typeof localStorage !== "undefined") {
+    localStorage.removeItem("sg_user");
+    localStorage.removeItem("nexora-token");
+    localStorage.removeItem("nexora-user");
+    localStorage.removeItem("nexora-auth");
+  }
 }
 
 export function clearAuthSession() {
   secureLocalStorage.removeItem(AUTH_TOKEN_KEY);
   secureLocalStorage.removeItem(AUTH_USER_KEY);
   secureLocalStorage.removeItem(AUTH_FLAG_KEY);
+
+  if (typeof localStorage !== "undefined") {
+    localStorage.removeItem("sg_user");
+    localStorage.removeItem("nexora-token");
+    localStorage.removeItem("nexora-user");
+    localStorage.removeItem("nexora-auth");
+  }
 }
 
 export async function authFetch(

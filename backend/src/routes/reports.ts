@@ -465,6 +465,37 @@ reportsRouter.get("/:id", authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
+export function getExactDayRange(dateInput?: string | Date | null): { dayStart: Date; dayEnd: Date } {
+  const d = dateInput ? new Date(dateInput) : new Date();
+  const validDate = isNaN(d.getTime()) ? new Date() : d;
+
+  let year: number, month: number, day: number;
+
+  if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}/.test(dateInput.trim())) {
+    const parts = dateInput.trim().split("T")[0].split("-").map(Number);
+    year = parts[0];
+    month = parts[1] - 1;
+    day = parts[2];
+  } else {
+    year = validDate.getFullYear();
+    month = validDate.getMonth();
+    day = validDate.getDate();
+  }
+
+  const localStart = new Date(year, month, day, 0, 0, 0, 0);
+  const localEnd = new Date(year, month, day, 23, 59, 59, 999);
+  const utcStart = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+  const utcEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+
+  const minTime = Math.min(localStart.getTime(), utcStart.getTime());
+  const maxTime = Math.max(localEnd.getTime(), utcEnd.getTime());
+
+  return {
+    dayStart: new Date(minTime),
+    dayEnd: new Date(maxTime),
+  };
+}
+
 // POST /api/reports/check — Pre-upload check endpoint to inspect existing reports & entry changes
 reportsRouter.post("/check", authenticateToken, async (req: AuthRequest, res) => {
   try {
@@ -506,10 +537,7 @@ reportsRouter.post("/check", authenticateToken, async (req: AuthRequest, res) =>
     }
 
     // Determine target date window (Start of day to End of day) for duplicate checking
-    const dayStart = new Date(customCreatedAt);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(customCreatedAt);
-    dayEnd.setHours(23, 59, 59, 999);
+    const { dayStart, dayEnd } = getExactDayRange(createdAt || customCreatedAt);
     const dayFilter = { createdAt: { $gte: dayStart, $lte: dayEnd } };
     const existingReportsOnDay = await ReportModel.find(dayFilter);
 
@@ -671,10 +699,7 @@ reportsRouter.post("/", authenticateToken, async (req: AuthRequest, res) => {
     }
 
     // Determine target date window (Start of day to End of day) for duplicate checking
-    const dayStart = new Date(customCreatedAt);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(customCreatedAt);
-    dayEnd.setHours(23, 59, 59, 999);
+    const { dayStart, dayEnd } = getExactDayRange(createdAt || customCreatedAt);
     const dayFilter = { createdAt: { $gte: dayStart, $lte: dayEnd } };
     const existingReportsOnDay = await ReportModel.find(dayFilter);
 
@@ -765,6 +790,27 @@ reportsRouter.post("/", authenticateToken, async (req: AuthRequest, res) => {
     }
 
     // 4. Create new report document
+    let newReportData = enriched.data || [];
+    try {
+      const priorReport = await ReportModel.findOne({
+        $or: [
+          { name: { $regex: `^${escapeRegex(cleanName)}$`, $options: "i" } },
+          { type: { $regex: `^${escapeRegex(cleanName)}$`, $options: "i" } },
+        ],
+        createdAt: { $lt: dayStart },
+      }).sort({ createdAt: -1 });
+
+      if (priorReport && Array.isArray(priorReport.data) && priorReport.data.length > 0) {
+        newReportData = computeRowDiffs(
+          priorReport.data as Record<string, unknown>[],
+          newReportData,
+          uploaderName
+        );
+      }
+    } catch (err) {
+      console.warn("Failed to compare new report against prior report:", err);
+    }
+
     const reportId = `REP-${Date.now().toString(36).toUpperCase()}`;
     const newReport = await ReportModel.create({
       reportId,
@@ -776,8 +822,8 @@ reportsRouter.post("/", authenticateToken, async (req: AuthRequest, res) => {
       roleId,
       contentHash,
       status: "Pending",
-      rowsCount: Array.isArray(enriched.data) ? enriched.data.length : 0,
-      data: enriched.data || [],
+      rowsCount: Array.isArray(newReportData) ? newReportData.length : 0,
+      data: newReportData,
       headers: enriched.headers || [],
       headerStructure: enriched.headerStructure as unknown as Record<
         string,
@@ -929,6 +975,21 @@ reportsRouter.delete("/:id", async (req: AuthRequest, res) => {
       return res
         .status(404)
         .json({ success: false, error: "Report not found." });
+    }
+
+    if (deleted.name || deleted.type) {
+      const targetName = (deleted.name || deleted.type || "").trim();
+      const remainingCount = await ReportModel.countDocuments({
+        $or: [
+          { name: { $regex: `^${escapeRegex(targetName)}$`, $options: "i" } },
+          { type: { $regex: `^${escapeRegex(targetName)}$`, $options: "i" } },
+        ],
+      });
+      if (remainingCount === 0) {
+        await ReportTypeModel.deleteMany({
+          name: { $regex: `^${escapeRegex(targetName)}$`, $options: "i" },
+        });
+      }
     }
 
     await syncReportTypes();

@@ -13,7 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import { SGReportLogo } from "@/components/SGReportLogo";
-import { authFetch, getAuthUser, clearAuthSession } from "@/lib/apiClient";
+import { authFetch, getAuthUser, getAuthToken, setAuthSession, clearAuthSession } from "@/lib/apiClient";
 import { AppLayoutContext } from "@/lib/AppLayoutContext";
 import type { PermissionActions } from "@shared/api";
 
@@ -126,9 +126,10 @@ export function AppLayout({ children }: AppLayoutProps) {
       })
       .then((res) => {
         if (res && res.success && res.user) {
-          try {
-            localStorage.setItem("sg_user", JSON.stringify(res.user));
-          } catch {}
+          const token = getAuthToken();
+          if (token) {
+            setAuthSession(token, res.user);
+          }
           setCurrentUser(res.user);
           populatePermissionsMap(res.user.modulePermissions);
         }

@@ -59,8 +59,18 @@ function DashboardContent() {
     };
   }, [fromDate, toDate]);
 
+  const formatCreatedDate = (dateVal?: string | Date) => {
+    if (!dateVal) return "N/A";
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return String(dateVal);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
   const filteredRows = reportsData.filter((row) =>
-    `${row.reportId || row._id || row.id || ""} ${row.name || ""} ${row.type || ""} ${row.owner || ""} ${row.source || ""}`
+    `${row.reportId || row._id || row.id || ""} ${row.name || ""} ${row.type || ""} ${row.owner || ""} ${row.source || ""} ${row.createdAt || ""}`
       .toLowerCase()
       .includes(query.toLowerCase())
   );
@@ -80,13 +90,14 @@ function DashboardContent() {
       window.setTimeout(() => setNotice(""), 2200);
       return;
     }
-    const header = "Report ID,Report Name,Type,Source,Owner,Records,Status";
+    const header = "Report ID,Report Name,Type,Created Date,Source,Owner,Records,Status";
     const body = filteredRows
       .map((row) =>
         [
           row.reportId || row._id || row.id || "REP",
           row.name,
           row.type,
+          formatCreatedDate(row.createdAt),
           row.source,
           row.owner,
           String(row.rowsCount || 0),
@@ -213,11 +224,12 @@ function DashboardContent() {
         </div>
 
         <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
-          <table className="w-full min-w-[760px] text-left">
+          <table className="w-full min-w-[860px] text-left">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/70 text-[12px] font-bold uppercase tracking-[0.08em] text-slate-600">
                 <th className="px-6 py-3.5">Report ID</th>
                 <th className="py-3.5">Report type</th>
+                <th className="py-3.5">Created Date</th>
                 <th className="py-3.5">Source</th>
                 <th className="py-3.5">User</th>
                 <th className="py-3.5">Records</th>
@@ -231,6 +243,9 @@ function DashboardContent() {
                     {row.reportId || row._id || row.id || "REP-100"}
                   </td>
                   <td className="py-4 text-xs font-semibold text-slate-600">{row.name || row.type}</td>
+                  <td className="py-4 text-xs font-medium text-slate-600 whitespace-nowrap">
+                    {formatCreatedDate(row.createdAt)}
+                  </td>
                   <td className="py-4 text-[11px] text-slate-600">{row.source}</td>
                   <td className="py-4 text-xs text-slate-600">{row.owner}</td>
                   <td className="py-4 text-xs font-semibold text-slate-600">{row.rowsCount || 0}</td>

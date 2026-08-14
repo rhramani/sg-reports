@@ -7,6 +7,7 @@ import { Navigate, BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { isTokenValid, clearAuthSession } from "@/lib/apiClient";
+import { useTokenExpiryWatcher } from "@/hooks/useTokenExpiryWatcher";
 
 const Login = lazy(() => import("./pages/Login"));
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -22,6 +23,8 @@ const Profile = lazy(() => import("./pages/Profile"));
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
+  useTokenExpiryWatcher();
+
   if (!isTokenValid()) {
     clearAuthSession();
     return <Navigate to="/login" replace />;

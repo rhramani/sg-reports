@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDBStatus } from "../db";
 import { ReportTypeModel } from "../models/ReportType";
+import { ReportModel } from "../models/Report";
 import { syncReportTypes } from "../utils/reportTypeSyncer";
 
 export const reportTypesRouter = Router();
@@ -134,7 +135,11 @@ reportTypesRouter.patch("/:id/status", async (req, res) => {
   }
 });
 
-// DELETE /api/report-types/:id — delete
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// DELETE /api/report-types/:id — delete report type and its associated reports
 reportTypesRouter.delete("/:id", async (req, res) => {
   try {
     const dbStatus = getDBStatus();
@@ -147,9 +152,23 @@ reportTypesRouter.delete("/:id", async (req, res) => {
       return res.status(404).json({ success: false, error: "Report type not found." });
     }
 
+    // Delete all associated reports in ReportModel with matching name or type
+    if (deleted.name) {
+      const cleanName = deleted.name.trim();
+      const escaped = escapeRegex(cleanName);
+      await ReportModel.deleteMany({
+        $or: [
+          { name: { $regex: `^${escaped}$`, $options: "i" } },
+          { type: { $regex: `^${escaped}$`, $options: "i" } },
+        ],
+      });
+    }
+
+    await syncReportTypes();
+
     res.json({
       success: true,
-      message: `Report type '${deleted.name}' deleted successfully.`,
+      message: `Report type '${deleted.name}' and associated reports deleted successfully.`,
     });
   } catch (error) {
     res.status(500).json({ success: false, error: (error as Error).message });

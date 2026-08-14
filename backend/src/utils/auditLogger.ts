@@ -176,7 +176,7 @@ export async function logActivity(
     const user = authReq.user;
 
     const userName = params.userName || user?.name || "System User";
-    const userEmail = (params.userEmail || user?.email || "system@nexora.com").toLowerCase();
+    const userEmail = (params.userEmail || user?.email || "system@sgreport.com").toLowerCase();
     const userRole = params.userRole || user?.role || "Viewer";
     const ipAddress = params.ipAddress || extractClientIP(req);
     const userAgent = extractUserAgent(req);

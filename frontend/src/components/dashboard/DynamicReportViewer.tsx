@@ -1460,9 +1460,60 @@ function LedgerPane({
         <table className="w-full min-w-full border-separate border-spacing-0 text-left">
           <thead className="sticky top-0 z-20">
             <tr className="bg-[#18476A] text-[10.5px] font-bold uppercase tracking-[0.08em] text-white">
-              <th className="sticky left-0 top-0 z-30 w-9 border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 whitespace-nowrap align-middle">
-                Check
-              </th>
+              {(() => {
+                const paneIndices = rows.map((r) => r.index);
+                const isAllPaneSelected =
+                  paneIndices.length > 0 &&
+                  paneIndices.every((idx) => selected.includes(idx));
+                const isSomePaneSelected =
+                  !isAllPaneSelected &&
+                  paneIndices.some((idx) => selected.includes(idx));
+
+                const toggleSelectPane = () => {
+                  if (isAllPaneSelected) {
+                    paneIndices.forEach((idx) => {
+                      if (selected.includes(idx)) {
+                        toggleApproval(idx);
+                      }
+                    });
+                  } else {
+                    paneIndices.forEach((idx) => {
+                      if (!selected.includes(idx)) {
+                        toggleApproval(idx);
+                      }
+                    });
+                  }
+                };
+                return (
+                  <th className="sticky left-0 top-0 z-30 border-r border-b border-white/20 bg-[#18476A] px-3 py-2.5 whitespace-nowrap align-middle">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={toggleSelectPane}
+                        className={`grid h-4 w-4 place-items-center rounded border transition ${
+                          isAllPaneSelected
+                            ? "border-emerald-400 bg-emerald-500 text-white"
+                            : isSomePaneSelected
+                              ? "border-emerald-400 bg-emerald-100 text-emerald-800"
+                              : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                        }`}
+                        title={isAllPaneSelected ? "Deselect All in Pane" : "Select All in Pane"}
+                      >
+                        {isAllPaneSelected ? (
+                          <Check size={11} strokeWidth={3} />
+                        ) : isSomePaneSelected ? (
+                          <Minus size={11} strokeWidth={3} />
+                        ) : (
+                          <Check size={11} strokeWidth={3} />
+                        )}
+                      </button>
+                      <span className="text-white font-bold text-[10.5px] uppercase whitespace-nowrap">
+                        Check
+                      </span>
+                    </div>
+                  </th>
+                );
+              })()}
               {textColumns.map((column) => (
                 <th
                   key={column}
@@ -1485,16 +1536,7 @@ function LedgerPane({
             {renderItems.map((item) => {
               const { row, index, group, groupId, bandIndex, isNewEntryStart } =
                 item;
-              const groupIndices = getRelatedGroupIndices
-                ? getRelatedGroupIndices(index)
-                : [index];
-              const isFullyApproved =
-                groupIndices.length > 0 &&
-                groupIndices.every((idx) => selected.includes(idx));
-              const isPartiallyApproved =
-                !isFullyApproved &&
-                groupIndices.some((idx) => selected.includes(idx));
-              const isRowApproved = isFullyApproved || selected.includes(index);
+              const isRowApproved = selected.includes(index);
 
               const band = getEntryBandStyle(bandIndex, entryColorPalette);
               const user = getAuthUser();
@@ -1528,56 +1570,55 @@ function LedgerPane({
                         : ""
                     }`}
                   >
-                    {isNewEntryStart && (
-                      <div className="flex flex-col items-start gap-1 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
+                    <div className="flex flex-col items-start gap-1 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleApproval(index)}
+                          title={
+                            isRowApproved
+                              ? `Row #${index + 1} Selected - click to deselect`
+                              : `Select Row #${index + 1}`
+                          }
+                          className={`grid h-4 w-4 place-items-center rounded border transition ${
+                            isRowApproved
+                              ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
+                              : "border-slate-400 bg-white text-transparent hover:border-slate-600"
+                          }`}
+                        >
+                          {isRowApproved ? (
+                            <Check size={12} strokeWidth={3} />
+                          ) : (
+                            <Check size={12} strokeWidth={3} />
+                          )}
+                        </button>
+                        {isNewEntryStart && canDelete && onDeleteRow && (
                           <button
                             type="button"
-                            onClick={() => toggleApproval(index)}
-                            title={
-                              isFullyApproved
-                                ? `Entry #${groupId + 1} Approved (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""}) - click to deselect`
-                                : isPartiallyApproved
-                                  ? `Entry #${groupId + 1} Partially Selected - click to select all`
-                                  : `Approve Entry #${groupId + 1} (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""})`
-                            }
-                            className={`grid h-4 w-4 place-items-center rounded border transition ${
-                              isFullyApproved
-                                ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
-                                : isPartiallyApproved
-                                  ? "border-emerald-500 bg-emerald-100 text-emerald-800 shadow-xs"
-                                  : "border-slate-400 bg-white text-transparent hover:border-slate-600"
-                            }`}
+                            onClick={() => onDeleteRow(index)}
+                            className="p-0.5 text-slate-400 hover:text-rose-600 transition rounded hover:bg-rose-50"
+                            title="Delete entry"
                           >
-                            {isPartiallyApproved ? (
-                              <Minus size={12} strokeWidth={3} />
-                            ) : (
-                              <Check size={12} strokeWidth={3} />
-                            )}
+                            <Trash2 size={13} />
                           </button>
-                          {canDelete && onDeleteRow && (
-                            <button
-                              type="button"
-                              onClick={() => onDeleteRow(index)}
-                              className="p-0.5 text-slate-400 hover:text-rose-600 transition rounded hover:bg-rose-50"
-                              title="Delete entry"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        </div>
-                        {isRowApproved && (
-                          <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
-                            By - {currentUserName}
-                          </span>
-                        )}
-                        {isRowModified && (
-                          <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
-                            <RefreshCw size={9} className="text-amber-700 animate-spin-slow" /> Modified
-                          </span>
                         )}
                       </div>
-                    )}
+                      {isRowApproved && (
+                        <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
+                          By - {currentUserName}
+                        </span>
+                      )}
+                      {isNewEntryStart && isRowModified && (
+                        <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
+                          <RefreshCw size={9} className="text-amber-700 animate-spin-slow" /> Modified
+                        </span>
+                      )}
+                      {isNewEntryStart && isNewRowEntry && (
+                        <span className="inline-flex items-center gap-1 rounded bg-emerald-100/90 border border-emerald-300 px-1 py-0.5 text-[9px] font-bold text-emerald-900 whitespace-nowrap shadow-2xs mt-0.5">
+                          <Sparkles size={9} className="text-emerald-700" /> New Entry
+                        </span>
+                      )}
+                    </div>
                   </td>
                   {textColumns.map((column) => {
                     const valNode =
@@ -3149,13 +3190,11 @@ export function DynamicReportViewer({
   };
 
   const toggleApproval = (index: number) => {
-    const groupIndices = getRelatedGroupIndices(index);
     setSelected((current) => {
-      const allSelected = groupIndices.every((idx) => current.includes(idx));
-      if (allSelected) {
-        return current.filter((idx) => !groupIndices.includes(idx));
+      if (current.includes(index)) {
+        return current.filter((idx) => idx !== index);
       }
-      return Array.from(new Set([...current, ...groupIndices]));
+      return [...current, index];
     });
   };
 
@@ -3939,14 +3978,7 @@ export function DynamicReportViewer({
                           ? (row._originalIndex as number)
                           : index;
                       const groupIndices = getRelatedGroupIndices(origIndex);
-                      const isFullyApproved =
-                        groupIndices.length > 0 &&
-                        groupIndices.every((idx) => selected.includes(idx));
-                      const isPartiallyApproved =
-                        !isFullyApproved &&
-                        groupIndices.some((idx) => selected.includes(idx));
-                      const isRowApproved =
-                        isFullyApproved || selected.includes(origIndex);
+                      const isRowApproved = selected.includes(origIndex);
 
                       const meta = rowGroupMeta.get(origIndex);
                       const groupId = meta?.groupId ?? index;
@@ -4019,48 +4051,45 @@ export function DynamicReportViewer({
                                 : ""
                             }`}
                           >
-                            {isNewEntryStart && (
-                              <div className="flex flex-col items-start gap-1 whitespace-nowrap">
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleApproval(origIndex)}
-                                    title={
-                                      isFullyApproved
-                                        ? `Entry #${groupId + 1} Approved (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""}) - click to deselect`
-                                        : isPartiallyApproved
-                                          ? `Entry #${groupId + 1} Partially Selected - click to select all`
-                                          : `Approve Entry #${groupId + 1} (${groupIndices.length} row${groupIndices.length > 1 ? "s" : ""})`
-                                    }
-                                    className={`grid h-5 w-5 place-items-center rounded border transition ${
-                                      isFullyApproved
-                                        ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
-                                        : isPartiallyApproved
-                                          ? "border-emerald-500 bg-emerald-100 text-emerald-800 shadow-sm"
-                                          : "border-slate-300 bg-white text-transparent hover:border-slate-400"
-                                    }`}
-                                  >
-                                    {isFullyApproved ? (
-                                      <Check size={13} strokeWidth={3} />
-                                    ) : isPartiallyApproved ? (
-                                      <Minus size={13} strokeWidth={3} />
-                                    ) : (
-                                      <Check size={13} strokeWidth={3} />
-                                    )}
-                                  </button>
-                                </div>
-                                {isRowApproved && (
-                                  <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
-                                    By - {currentUserName}
-                                  </span>
-                                )}
-                                {isRowModified && (
-                                  <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
-                                    <RefreshCw size={9} className="text-amber-700 animate-spin-slow" /> Modified
-                                  </span>
-                                )}
+                            <div className="flex flex-col items-start gap-1 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleApproval(origIndex)}
+                                  title={
+                                    isRowApproved
+                                      ? `Row #${origIndex + 1} Selected - click to deselect`
+                                      : `Select Row #${origIndex + 1}`
+                                  }
+                                  className={`grid h-5 w-5 place-items-center rounded border transition ${
+                                    isRowApproved
+                                      ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
+                                      : "border-slate-300 bg-white text-transparent hover:border-slate-400"
+                                  }`}
+                                >
+                                  {isRowApproved ? (
+                                    <Check size={13} strokeWidth={3} />
+                                  ) : (
+                                    <Check size={13} strokeWidth={3} />
+                                  )}
+                                </button>
                               </div>
-                            )}
+                              {isRowApproved && (
+                                <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
+                                  By - {currentUserName}
+                                </span>
+                              )}
+                              {isNewEntryStart && isRowModified && (
+                                <span className="inline-flex items-center gap-1 rounded bg-amber-100/90 border border-amber-300 px-1 py-0.5 text-[9px] font-bold text-amber-900 whitespace-nowrap shadow-2xs mt-0.5">
+                                  <RefreshCw size={9} className="text-amber-700 animate-spin-slow" /> Modified
+                                </span>
+                              )}
+                              {isNewEntryStart && isNewRowEntry && (
+                                <span className="inline-flex items-center gap-1 rounded bg-emerald-100/90 border border-emerald-300 px-1 py-0.5 text-[9px] font-bold text-emerald-900 whitespace-nowrap shadow-2xs mt-0.5">
+                                  <Sparkles size={9} className="text-emerald-700" /> New Entry
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           {gridDisplayColumns.map((column) => {

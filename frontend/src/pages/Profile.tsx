@@ -290,7 +290,7 @@ function ProfileContent() {
           <div className="flex flex-wrap items-center justify-center md:justify-start gap-y-1 gap-x-6 text-xs sm:text-sm text-slate-500 font-medium">
             <span className="flex items-center gap-1.5">
               <Mail className="w-4 h-4 text-[#18476A]" />
-              {sessionUser?.email || "user@nexora.com"}
+              {sessionUser?.email || "user@sgreport.com"}
             </span>
             {sessionUser?.mobileNumber && (
               <span className="flex items-center gap-1.5">

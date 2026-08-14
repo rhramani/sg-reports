@@ -2,8 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { UserSession } from "@shared/api";
 
-const JWT_SECRET = process.env.JWT_SECRET || "nexora_jwt_secret_key_2026_super_secure";
-const TOKEN_EXPIRY_HOURS = 24;
+const JWT_SECRET = process.env.JWT_SECRET || "sgreport_jwt_secret_key_2026_super_secure";
+const TOKEN_EXPIRY_HOURS = Number(process.env.TOKEN_EXPIRY_HOURS) || 24;
 export const TOKEN_EXPIRY_MS = TOKEN_EXPIRY_HOURS * 60 * 60 * 1000;
 
 export interface AuthRequest extends Request {
@@ -23,7 +23,7 @@ export function generateToken(user: UserSession): { token: string; expiresAt: nu
     expiresAt,
   };
   const token = jwt.sign(userPayload, JWT_SECRET, {
-    expiresIn: "24h",
+    expiresIn: Math.floor(TOKEN_EXPIRY_MS / 1000),
   });
   return { token, expiresAt };
 }
