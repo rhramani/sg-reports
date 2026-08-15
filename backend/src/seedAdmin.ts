@@ -10,8 +10,8 @@ import { UserModel } from "./models/User";
 import { generateToken } from "./middleware/auth";
 
 async function seedSuperAdmin() {
-  const email = process.env.SUPER_ADMIN_EMAIL || "sgreport@gmail.com";
-  const password = process.env.SUPER_ADMIN_PASSWORD || "sgreport@5876";
+  const email = process.env.SUPER_ADMIN_EMAIL || "goldshrddha@gmail.com";
+  const password = process.env.SUPER_ADMIN_PASSWORD || "goldshrddha@5876";
   const name = process.env.SUPER_ADMIN_NAME || "SG Super Admin";
 
   if (!password) {
