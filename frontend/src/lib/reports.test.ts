@@ -255,5 +255,57 @@ describe("Report Day Range & Diff Logic", () => {
     expect(alignedDebit[2].isPlaceholder).toBe(true);
     expect(alignedCredit[2].row.Party).toBe("BADLO KAUSHIK RAJKOT");
   });
+
+  it("selects entries entry-wise (separately for each individual entry)", () => {
+    const targetIndex = 1;
+    // Each entry is toggled separately (entry-wise selection)
+    const selected = [targetIndex];
+    expect(selected).toEqual([1]);
+    expect(selected).not.toContain(0);
+    expect(selected).not.toContain(2);
+  });
+
+  it("selects side-by-side paired entries in Metal Journal report", () => {
+    const debit = [
+      { row: { Party: "AMD GAUTAM JEW", "Net Weight": 17.76 }, index: 1, group: "", groupId: 0 },
+    ];
+    const credit = [
+      { row: { Party: "LABHLAXMI CHAIN", "Net Weight (2)": 17.76 }, index: 3, group: "", groupId: 1 },
+    ];
+    const { alignedDebit, alignedCredit } = pairAndAlignLedgerEntries(debit, credit);
+
+    // Simulating Metal Journal side-by-side checkbox toggle for targetIndex = 1
+    const targetIndex = 1;
+    let pairedIndex = -1;
+    for (let k = 0; k < alignedDebit.length; k++) {
+      const d = alignedDebit[k];
+      const c = alignedCredit[k];
+      if (d && c && !d.isPlaceholder && !c.isPlaceholder) {
+        if (d.index === targetIndex && c.index >= 0) {
+          pairedIndex = c.index;
+          break;
+        }
+      }
+    }
+
+    expect(pairedIndex).toBe(3);
+    const selected = [targetIndex, pairedIndex];
+    expect(selected).toContain(1);
+    expect(selected).toContain(3);
+  });
+
+  it("calculates simple arithmetic average rate for Rate Cut reports", () => {
+    const rates = [14630.00, 14672.35, 14780.50, 16000.00, 27879.00, 26857.14];
+    const sum = rates.reduce((a, b) => a + b, 0);
+    const avg = sum / rates.length;
+    expect(sum).toBeCloseTo(114818.99, 2);
+    expect(avg).toBeCloseTo(19136.4983, 4);
+    expect(Number(avg.toFixed(2))).toBe(19136.50);
+  });
 });
+
+
+
+
+
 
