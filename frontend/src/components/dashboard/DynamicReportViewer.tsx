@@ -1460,11 +1460,24 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
     mainHeaders.some((g) => /^credit|^debit|^dr$|^cr$/i.test(g.title.trim())) &&
     mainHeaders.length >= 2;
 
+  const explicitTypeCol = headers.find((h) =>
+    /^type$|^p\.?type$|^dr\.?\/?cr$|category|nature|inout/i.test(h.trim()),
+  );
+  const hasTypeDebitCredit =
+    !!explicitTypeCol &&
+    parsed.some((r) =>
+      /debit|\bdr\b|\[01\]/i.test(String(r[explicitTypeCol] ?? "")),
+    ) &&
+    parsed.some((r) =>
+      /credit|\bcr\b|\[02\]/i.test(String(r[explicitTypeCol] ?? "")),
+    );
+
   const hasCreditDebitCols =
     isRateCutReport ||
     isMetalJournalSheet ||
     hasDualDrCrCols ||
-    hasDualDrCrMainHeaders;
+    hasDualDrCrMainHeaders ||
+    hasTypeDebitCredit;
 
   const isMeltingReport = false;
 
@@ -1529,6 +1542,222 @@ export interface LedgerPaneRow {
   isPlaceholder?: boolean;
   matchedPairId?: string;
   matchedWeight?: number;
+}
+
+export function classifyLedgerEntry(
+  row: Record<string, any>,
+  displayCols: string[] = [],
+  typeCol?: string,
+  debitCol?: string,
+  creditCol?: string,
+): "debit" | "credit" {
+  // 1. Check explicit Type / Category / DrCr / InOut / Nature field
+  const explicitType = String(
+    row["Type"] ||
+      (typeCol ? row[typeCol] : "") ||
+      row["P.Type"] ||
+      row["InOut"] ||
+      row["Dr/Cr"] ||
+      row["DrCr"] ||
+      row["Category"] ||
+      row["Nature"] ||
+      "",
+  ).trim();
+
+  if (explicitType) {
+    const isDr =
+      /debit|^dr\b|\[01\]|receipt|receive|deposit|\bplus\b|\bin\b/i.test(
+        explicitType,
+      );
+    const isCr =
+      /credit|^cr\b|\[02\]|issue|payment|withdraw|\bminus\b|\bout\b/i.test(
+        explicitType,
+      );
+    if (isDr && !isCr) return "debit";
+    if (isCr && !isDr) return "credit";
+  }
+
+  const parseNum = (val: any) => {
+    if (!val) return 0;
+    const num = parseFloat(String(val).replace(/[^0-9.-]+/g, ""));
+    return isNaN(num) ? 0 : num;
+  };
+
+  // 2. Check explicit Debit / Credit Amount columns
+  if (debitCol && creditCol) {
+    const drVal = parseNum(row[debitCol]);
+    const crVal = parseNum(row[creditCol]);
+    if (drVal > 0 && crVal === 0) return "debit";
+    if (crVal > 0 && drVal === 0) return "credit";
+  }
+
+  // 3. Dual-column reports (e.g. Metal Journal with "(2)" suffix columns)
+  const hasDualCols = displayCols.some((c) => /\(2\)$/.test(c.trim()));
+  if (hasDualCols) {
+    const netWtRec = parseNum(row["Net Weight"]);
+    const pureWtRec = parseNum(row["Pure Weight"]);
+    const amtRec = parseNum(row["Amount"]);
+    const netWtRet = parseNum(row["Net Weight (2)"]);
+    const pureWtRet = parseNum(row["Pure Weight (2)"]);
+    const amtRet = parseNum(row["Amount (2)"]);
+
+    if (
+      (netWtRec > 0 || pureWtRec > 0 || amtRec > 0) &&
+      netWtRet === 0 &&
+      pureWtRet === 0 &&
+      amtRet === 0
+    ) {
+      return "debit";
+    }
+    if (
+      (netWtRet > 0 || pureWtRet > 0 || amtRet > 0) &&
+      netWtRec === 0 &&
+      pureWtRec === 0 &&
+      amtRec === 0
+    ) {
+      return "credit";
+    }
+  }
+
+  // 4. Book Name / BookHeadName directional checks
+  const bookName = String(
+    row["Book Name"] || row["BookHeadName"] || "",
+  )
+    .trim()
+    .toLowerCase();
+  if (bookName) {
+    const isRec = /receive|receipt|\bmtr\b|\bplus\b|deposit/i.test(bookName);
+    const isIss =
+      /issue|return|\bmti\b|\bminus\b|withdraw|payment/i.test(bookName);
+    if (isRec && !isIss) return "debit";
+    if (isIss && !isRec) return "credit";
+  }
+
+  // 5. Check row text for explicit [01] / Debit vs [02] / Credit markers
+  const rowStr = Object.values(row)
+    .map((v) => String(v ?? ""))
+    .join(" ")
+    .toLowerCase();
+  const hasDrMarker =
+    /\[01\]|\bdebit\b|\bdr\b|receipt|receive|deposit/i.test(rowStr);
+  const hasCrMarker =
+    /\[02\]|\bcredit\b|\bcr\b|payment|issue|withdraw/i.test(rowStr);
+  if (hasDrMarker && !hasCrMarker) return "debit";
+  if (hasCrMarker && !hasDrMarker) return "credit";
+
+  // Default to debit if completely indeterminate
+  return "debit";
+}
+
+export function resolveLedgerPaneTitles({
+  isRateCut,
+  isFinding,
+  isMetalJournal,
+  debit,
+  credit,
+  typeCol,
+}: {
+  isRateCut: boolean;
+  isFinding: boolean;
+  isMetalJournal: boolean;
+  debit: LedgerPaneRow[];
+  credit: LedgerPaneRow[];
+  typeCol?: string;
+}): { leftTitle: string; rightTitle: string } {
+  if (isRateCut) {
+    return {
+      leftTitle: isFinding
+        ? "02 SALE / ISSUE (SELL)"
+        : "02 SALE RATE CUT (SELL)",
+      rightTitle: isFinding
+        ? "01 FINDING PURCHASES (PURCHASE)"
+        : "01 PURCHASE RATE CUT (PURCHASE)",
+    };
+  }
+
+  if (isMetalJournal) {
+    return {
+      leftTitle: "Material Customer Receive (Plus)",
+      rightTitle: "Material Customer Return (Minus)",
+    };
+  }
+
+  const debitBookNames = debit
+    .map(({ row }) =>
+      String(row["Book Name"] || row["BookHeadName"] || "").trim(),
+    )
+    .filter((v) => v !== "" && v !== "—");
+
+  const creditBookNames = credit
+    .map(({ row }) =>
+      String(row["Book Name"] || row["BookHeadName"] || "").trim(),
+    )
+    .filter((v) => v !== "" && v !== "—");
+
+  const hasDistinctDirectionalBooks =
+    debitBookNames.length > 0 &&
+    creditBookNames.length > 0 &&
+    debitBookNames.some((b) =>
+      /receive|receipt|\bmtr\b|\bplus\b|deposit/i.test(b),
+    ) &&
+    creditBookNames.some((b) =>
+      /issue|return|\bmti\b|\bminus\b|withdraw|payment/i.test(b),
+    ) &&
+    !creditBookNames.some((b) =>
+      debitBookNames.some(
+        (db) => db.toLowerCase() === b.toLowerCase(),
+      ),
+    );
+
+  if (hasDistinctDirectionalBooks) {
+    const leftBook = Array.from(new Set(debitBookNames))
+      .slice(0, 2)
+      .join(" / ");
+    const rightBook = Array.from(new Set(creditBookNames))
+      .slice(0, 2)
+      .join(" / ");
+    if (leftBook && rightBook) {
+      return { leftTitle: leftBook, rightTitle: rightBook };
+    }
+  }
+
+  const debitTypes = debit
+    .map(({ row }) =>
+      String(row["Type"] || (typeCol ? row[typeCol] : "") || "").trim(),
+    )
+    .filter((v) => v !== "" && v !== "—");
+
+  const creditTypes = credit
+    .map(({ row }) =>
+      String(row["Type"] || (typeCol ? row[typeCol] : "") || "").trim(),
+    )
+    .filter((v) => v !== "" && v !== "—");
+
+  const topDebitType =
+    debitTypes.length > 0
+      ? Array.from(new Set(debitTypes)).slice(0, 2).join(" / ")
+      : "";
+  const topCreditType =
+    creditTypes.length > 0
+      ? Array.from(new Set(creditTypes)).slice(0, 2).join(" / ")
+      : "";
+
+  if (
+    topDebitType &&
+    topCreditType &&
+    topDebitType.toLowerCase() !== topCreditType.toLowerCase()
+  ) {
+    return { leftTitle: topDebitType, rightTitle: topCreditType };
+  } else if (topDebitType && !topCreditType) {
+    return { leftTitle: topDebitType, rightTitle: "CREDIT (CR)" };
+  } else if (!topDebitType && topCreditType) {
+    return { leftTitle: "DEBIT (DR)", rightTitle: topCreditType };
+  }
+
+  return {
+    leftTitle: "DEBIT (DR)",
+    rightTitle: "CREDIT (CR)",
+  };
 }
 
 export function pairAndAlignLedgerEntries(
@@ -1908,6 +2137,11 @@ interface LedgerPaneProps {
   onHoverPair?: (pairId: string | null) => void;
   scrollRef?: React.Ref<HTMLDivElement>;
   onScroll?: React.UIEventHandler<HTMLDivElement>;
+  showQuickColumnFilters?: boolean;
+  quickColumnFilters?: Record<string, string>;
+  onQuickColumnFiltersChange?: React.Dispatch<
+    React.SetStateAction<Record<string, string>>
+  >;
 }
 
 interface LedgerRenderItem {
@@ -1943,6 +2177,9 @@ function LedgerPane({
   onHoverPair,
   scrollRef,
   onScroll,
+  showQuickColumnFilters,
+  quickColumnFilters = {},
+  onQuickColumnFiltersChange,
 }: LedgerPaneProps) {
   const isDebit = tone === "debit";
 
@@ -2148,6 +2385,86 @@ function LedgerPane({
                 );
               })}
             </tr>
+
+            {showQuickColumnFilters && (
+              <tr className="bg-slate-100/95 border-b border-slate-300">
+                <th className="sticky left-0 bg-slate-200/90 px-3 py-1 border-r border-b border-slate-300 text-center z-10">
+                  <Filter size={11} className="text-slate-500 mx-auto" />
+                </th>
+                {textColumns.map((colKey) => (
+                  <th
+                    key={colKey}
+                    className="px-1.5 py-1 border-r border-b border-slate-300 bg-slate-100/90"
+                  >
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={quickColumnFilters[colKey] || ""}
+                        onChange={(e) =>
+                          onQuickColumnFiltersChange?.((prev) => ({
+                            ...prev,
+                            [colKey]: e.target.value,
+                          }))
+                        }
+                        placeholder="Filter..."
+                        className="h-6 w-full rounded border border-slate-300 bg-white px-1.5 pr-4 text-[11px] font-normal text-slate-800 placeholder-slate-400 outline-none focus:border-[#18476A] transition"
+                      />
+                      {quickColumnFilters[colKey] && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onQuickColumnFiltersChange?.((prev) => {
+                              const next = { ...prev };
+                              delete next[colKey];
+                              return next;
+                            })
+                          }
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+                ))}
+                {activeNumericKeys.map((nk) => (
+                  <th
+                    key={nk}
+                    className="px-1.5 py-1 border-r border-b border-slate-300 bg-slate-100/90"
+                  >
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={quickColumnFilters[nk] || ""}
+                        onChange={(e) =>
+                          onQuickColumnFiltersChange?.((prev) => ({
+                            ...prev,
+                            [nk]: e.target.value,
+                          }))
+                        }
+                        placeholder="Filter..."
+                        className="h-6 w-full rounded border border-slate-300 bg-white px-1.5 pr-4 text-[11px] font-normal text-slate-800 placeholder-slate-400 outline-none focus:border-[#18476A] transition"
+                      />
+                      {quickColumnFilters[nk] && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onQuickColumnFiltersChange?.((prev) => {
+                              const next = { ...prev };
+                              delete next[nk];
+                              return next;
+                            })
+                          }
+                          className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            )}
           </thead>
           <tbody>
             {renderItems.map((item) => {
@@ -2466,6 +2783,11 @@ interface LedgerTableViewProps {
   fileName?: string;
   reportName?: string;
   reportType?: string;
+  showQuickColumnFilters?: boolean;
+  quickColumnFilters?: Record<string, string>;
+  onQuickColumnFiltersChange?: React.Dispatch<
+    React.SetStateAction<Record<string, string>>
+  >;
 }
 
 function LedgerTableView({
@@ -2485,6 +2807,9 @@ function LedgerTableView({
   fileName = "",
   reportName = "",
   reportType = "",
+  showQuickColumnFilters = false,
+  quickColumnFilters = {},
+  onQuickColumnFiltersChange,
 }: LedgerTableViewProps) {
   const parseAmt = (val: any) => {
     if (!val) return 0;
@@ -2706,141 +3031,26 @@ function LedgerTableView({
       });
     }
   } else {
-    debit = entries.filter(({ row }) => {
-      const bookName = String(
-        row["Book Name"] || row["BookHeadName"] || "",
-      ).toLowerCase();
-      if (/receive|receipt|mtr|plus/i.test(bookName)) return true;
-
-      const netWtRec = parseAmt(row["Net Weight"]);
-      const pureWtRec = parseAmt(row["Pure Weight"]);
-      const amtRec = parseAmt(row["Amount"]);
-      const netWtRet = parseAmt(row["Net Weight (2)"]);
-      const pureWtRet = parseAmt(row["Pure Weight (2)"]);
-      const amtRet = parseAmt(row["Amount (2)"]);
-
-      if (
-        (netWtRec > 0 || pureWtRec > 0 || amtRec > 0) &&
-        netWtRet === 0 &&
-        pureWtRet === 0 &&
-        amtRet === 0
-      ) {
-        return true;
-      }
-
-      if (
-        debitCol &&
-        parseAmt(row[debitCol]) > 0 &&
-        (!creditCol || parseAmt(row[creditCol]) === 0)
-      )
-        return true;
-      if (
-        creditCol &&
-        parseAmt(row[creditCol]) === 0 &&
-        debitCol &&
-        parseAmt(row[debitCol]) > 0
-      )
-        return true;
-      if (
-        typeCol &&
-        row[typeCol] &&
-        /debit|\[01\]|receipt|receive|dr|in|plus|deposit/i.test(
-          String(row[typeCol]),
-        )
-      )
-        return true;
-      if (
-        row["Type"] &&
-        /debit|\[01\]|receipt|receive|dr|in|plus|deposit/i.test(
-          String(row["Type"]),
-        )
-      )
-        return true;
-      if (row["InOut"] && /in|receive/i.test(String(row["InOut"]))) return true;
-      if (
-        typeKey &&
-        row[typeKey] &&
-        /debit|receipt|receive|in|plus|deposit/i.test(String(row[typeKey]))
-      )
-        return true;
-      return false;
-    });
-
-    credit = entries.filter(({ row }) => {
-      const bookName = String(
-        row["Book Name"] || row["BookHeadName"] || "",
-      ).toLowerCase();
-      if (/issue|return|mti|minus/i.test(bookName)) return true;
-
-      const netWtRec = parseAmt(row["Net Weight"]);
-      const pureWtRec = parseAmt(row["Pure Weight"]);
-      const amtRec = parseAmt(row["Amount"]);
-      const netWtRet = parseAmt(row["Net Weight (2)"]);
-      const pureWtRet = parseAmt(row["Pure Weight (2)"]);
-      const amtRet = parseAmt(row["Amount (2)"]);
-
-      if (
-        (netWtRet > 0 || pureWtRet > 0 || amtRet > 0) &&
-        netWtRec === 0 &&
-        pureWtRec === 0 &&
-        amtRec === 0
-      ) {
-        return true;
-      }
-
-      if (
-        creditCol &&
-        parseAmt(row[creditCol]) > 0 &&
-        (!debitCol || parseAmt(row[debitCol]) === 0)
-      )
-        return true;
-      if (
-        debitCol &&
-        parseAmt(row[debitCol]) === 0 &&
-        creditCol &&
-        parseAmt(row[creditCol]) > 0
-      )
-        return true;
-      if (
-        typeCol &&
-        row[typeCol] &&
-        /credit|\[02\]|issue|payment|cr|out|minus|withdraw/i.test(
-          String(row[typeCol]),
-        )
-      )
-        return true;
-      if (
-        row["Type"] &&
-        /credit|\[02\]|issue|payment|cr|out|minus|withdraw/i.test(
-          String(row["Type"]),
-        )
-      )
-        return true;
-      if (row["InOut"] && /out|issue/i.test(String(row["InOut"]))) return true;
-      if (
-        typeKey &&
-        row[typeKey] &&
-        /credit|issue|payment|cr|out|minus|withdraw/i.test(String(row[typeKey]))
-      )
-        return true;
-      return false;
-    });
-
-    const unassigned = entries.filter(
-      (e) => !debit.includes(e) && !credit.includes(e),
+    debit = entries.filter(
+      (e) =>
+        classifyLedgerEntry(
+          e.row,
+          displayCols,
+          typeCol,
+          debitCol,
+          creditCol,
+        ) === "debit",
     );
-    if (unassigned.length > 0) {
-      unassigned.forEach((e) => {
-        const rowStr = JSON.stringify(e.row).toLowerCase();
-        if (/debit|receipt|in|receive|deposit/i.test(rowStr)) {
-          debit.push(e);
-        } else if (/credit|issue|payment|out|withdraw/i.test(rowStr)) {
-          credit.push(e);
-        } else {
-          debit.push(e);
-        }
-      });
-    }
+    credit = entries.filter(
+      (e) =>
+        classifyLedgerEntry(
+          e.row,
+          displayCols,
+          typeCol,
+          debitCol,
+          creditCol,
+        ) === "credit",
+    );
   }
 
   const getRowValue = (row: Record<string, any>, isDebitSide: boolean) => {
@@ -3186,56 +3396,17 @@ function LedgerTableView({
     return pairAndAlignLedgerEntries(debit, credit);
   }, [debit, credit, isMetalJournal]);
 
-  const leftPaneTitle = useMemo(() => {
-    if (isRateCut) return isFinding ? "02 SALE / ISSUE (SELL)" : "02 SALE RATE CUT (SELL)";
-    if (isMetalJournal) return "Material Customer Receive (Plus)";
-
-    const bookNames = debit
-      .map(({ row }) =>
-        String(
-          row["Book Name"] ||
-            row["BookHeadName"] ||
-            row["Category"] ||
-            row["Type"] ||
-            "",
-        ).trim(),
-      )
-      .filter((v) => v !== "" && v !== "—");
-
-    if (bookNames.length > 0) {
-      const topNames = Array.from(new Set(bookNames)).slice(0, 2).join(" / ");
-      if (topNames) return topNames;
-    }
-
-    return "Credit / Receive entry";
-  }, [isRateCut, isFinding, isMetalJournal, debit]);
-
-  const rightPaneTitle = useMemo(() => {
-    if (isRateCut)
-      return isFinding
-        ? "01 FINDING PURCHASES (PURCHASE)"
-        : "01 PURCHASE RATE CUT (PURCHASE)";
-    if (isMetalJournal) return "Material Customer Return (Minus)";
-
-    const bookNames = credit
-      .map(({ row }) =>
-        String(
-          row["Book Name"] ||
-            row["BookHeadName"] ||
-            row["Category"] ||
-            row["Type"] ||
-            "",
-        ).trim(),
-      )
-      .filter((v) => v !== "" && v !== "—");
-
-    if (bookNames.length > 0) {
-      const topNames = Array.from(new Set(bookNames)).slice(0, 2).join(" / ");
-      if (topNames) return topNames;
-    }
-
-    return "Debit / Issue entry";
-  }, [isRateCut, isFinding, isMetalJournal, credit]);
+  const { leftTitle: leftPaneTitle, rightTitle: rightPaneTitle } =
+    useMemo(() => {
+      return resolveLedgerPaneTitles({
+        isRateCut,
+        isFinding,
+        isMetalJournal,
+        debit,
+        credit,
+        typeCol,
+      });
+    }, [isRateCut, isFinding, isMetalJournal, debit, credit, typeCol]);
 
   const handleToggleApproval = (targetIndex: number) => {
     if (isMetalJournal) {
@@ -3273,27 +3444,7 @@ function LedgerTableView({
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[1040px]">
-        <div className="flex items-center justify-between border-b border-slate-300 bg-[#d1d1d1] px-5 py-3 text-slate-900">
-          <div>
-            <p className="text-xs font-bold">
-              {isFinding
-                ? "Finding Purchases & Sales Ledger"
-                : isRateCut
-                  ? "Rate Cut Purchase & Sale Ledger"
-                  : "Dynamic report ledger"}
-            </p>
-            <p className="mt-0.5 text-[10px] text-slate-600">
-              {isFinding
-                ? "Finding purchases, touch & rates dynamic calculation"
-                : isRateCut
-                  ? "Sell entries on Left Pane & Purchase entries on Right Pane with dynamic total calculation"
-                  : "All uploaded entries managed in one side-by-side ledger"}
-            </p>
-          </div>
-          <span className="text-[10px] font-semibold text-slate-600">
-            {entries.length} source rows
-          </span>
-        </div>
+
 
         {/* Side-by-side Ledger Panes: Left = Receive (Plus), Right = Return (Minus) */}
         <div className="grid grid-cols-2">
@@ -3317,6 +3468,9 @@ function LedgerTableView({
             onHoverPair={setHoveredPairId}
             scrollRef={isMetalJournal ? leftScrollRef : undefined}
             onScroll={isMetalJournal ? handleLeftScroll : undefined}
+            showQuickColumnFilters={showQuickColumnFilters}
+            quickColumnFilters={quickColumnFilters}
+            onQuickColumnFiltersChange={onQuickColumnFiltersChange}
           />
           <LedgerPane
             title={rightPaneTitle}
@@ -3338,6 +3492,9 @@ function LedgerTableView({
             onHoverPair={setHoveredPairId}
             scrollRef={isMetalJournal ? rightScrollRef : undefined}
             onScroll={isMetalJournal ? handleRightScroll : undefined}
+            showQuickColumnFilters={showQuickColumnFilters}
+            quickColumnFilters={quickColumnFilters}
+            onQuickColumnFiltersChange={onQuickColumnFiltersChange}
           />
         </div>
 
@@ -3435,29 +3592,7 @@ function LedgerTableView({
             </div>
           )}
 
-          {/* Row 4: Average Sale Touch / Average Purchase Touch */}
-          {(isRateCut || hasTouchMetric || saleAvgTouch > 0 || purchAvgTouch > 0) && (
-            <div className="grid grid-cols-2 divide-x divide-slate-300 border-b border-slate-300">
-              {/* Left Side: Average Sale Touch */}
-              <div className="grid grid-cols-4 items-center bg-white px-3 py-2 text-slate-900">
-                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-slate-900 pr-2">
-                  Average Sale Touch
-                </div>
-                <div className="text-right font-black text-slate-900 font-mono text-[13px] pr-2">
-                  {saleAvgTouch > 0 ? `${saleAvgTouch.toFixed(2)}%` : "—"}
-                </div>
-              </div>
-              {/* Right Side: Average Purchase Touch */}
-              <div className="grid grid-cols-4 items-center bg-white px-3 py-2 text-slate-900">
-                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-slate-900 pr-2">
-                  Average Purchase Touch
-                </div>
-                <div className="text-right font-black text-slate-900 font-mono text-[13px] pr-2">
-                  {purchAvgTouch > 0 ? `${purchAvgTouch.toFixed(2)}%` : "—"}
-                </div>
-              </div>
-            </div>
-          )}
+
 
           {/* Additional Rate Cut metric breakdown rows (e.g. Net Weight) */}
           {isRateCut && rateCutMetrics.length > 0 && (
@@ -4563,6 +4698,8 @@ function SingleReportCard({
           onToggleQuickColumnFilters={() =>
             setShowQuickColumnFilters((prev) => !prev)
           }
+          quickColumnFilters={quickColumnFilters}
+          onResetQuickColumnFilters={() => setQuickColumnFilters({})}
           totalRowCount={rows.length}
           filteredRowCount={filteredRows.length}
         />
@@ -4624,6 +4761,9 @@ function SingleReportCard({
                 fileName={fileName}
                 reportName={report.name}
                 reportType={report.type}
+                showQuickColumnFilters={showQuickColumnFilters}
+                quickColumnFilters={quickColumnFilters}
+                onQuickColumnFiltersChange={setQuickColumnFilters}
               />
             </div>
           )}
@@ -5749,7 +5889,7 @@ export function DynamicReportViewer({
 
     let backendMsg = `${parsed.length} rows and ${headers.length} columns detected`;
 
-    const cleanBackendData = processedRows.slice(0, 500).map((r) => {
+    const cleanBackendData = processedRows.map((r) => {
       const copy: Record<string, unknown> = {};
       Object.entries(r).forEach(([k, v]) => {
         if (!k.startsWith("_")) {
@@ -5927,8 +6067,10 @@ export function DynamicReportViewer({
           backendMsg =
             data.message ||
             `Corrected entries for report "${cleanName}" updated successfully in today's report!`;
-        } else if (parsed.length <= 500) {
-          backendMsg = `Report "${cleanName}" uploaded and saved to backend!`;
+        } else {
+          backendMsg =
+            data.message ||
+            `Report "${cleanName}" uploaded and saved to backend! (${cleanBackendData.length} rows)`;
         }
 
         await refreshAllData();

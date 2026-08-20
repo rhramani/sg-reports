@@ -4,6 +4,8 @@ import {
   calculateRowTouch,
   calculateOverallTouch,
   consolidateReportsByType,
+  classifyLedgerEntry,
+  resolveLedgerPaneTitles,
 } from "../components/dashboard/DynamicReportViewer";
 
 function getExactDayRange(dateInput?: string | Date | null): { dayStart: Date; dayEnd: Date } {
@@ -859,4 +861,147 @@ describe("consolidateReportsByType", () => {
     expect(melting!.data).toHaveLength(1);
     expect((melting as any)._isConsolidated).toBe(false);
   });
+
+  it("should preserve all 3,000+ rows when consolidating large reports", () => {
+    const largeDataset = Array.from({ length: 3000 }, (_, i) => ({
+      "Vou.No": `VOU-${i + 1}`,
+      Party: `Party ${i % 50}`,
+      Debit: i % 2 === 0 ? String(100 + i) : "",
+      Credit: i % 2 !== 0 ? String(100 + i) : "",
+    }));
+
+    const largeReport: any = {
+      _id: "rep-3000",
+      name: "Metal Journal Large",
+      type: "Metal Journal",
+      createdAt: "2026-08-15",
+      data: largeDataset,
+      headers: ["Vou.No", "Party", "Debit", "Credit"],
+    };
+
+    const result = consolidateReportsByType([largeReport]);
+    expect(result).toHaveLength(1);
+    expect(result[0].data).toHaveLength(3000);
+    expect(result[0].data![0]["Vou.No"]).toBe("VOU-1");
+    expect(result[0].data![2999]["Vou.No"]).toBe("VOU-3000");
+  });
 });
+
+describe("Journal Ledger Debit/Credit Classification and Pane Title Resolution", () => {
+  const journalCols = [
+    "EntryDate",
+    "Party",
+    "Book Name",
+    "Type",
+    "Amount",
+    "Transaction No",
+  ];
+
+  const sampleJournalRows = [
+    {
+      EntryDate: "8/1/26 11:23",
+      Party: "HDFC BHAVESHBHAI HUF",
+      "Book Name": "Journal",
+      Type: "[02] Credit",
+      Amount: "25000.00",
+      "Transaction No": "0",
+    },
+    {
+      EntryDate: "8/1/26 11:23",
+      Party: "INCOME TAX",
+      "Book Name": "Journal",
+      Type: "[01] Debit",
+      Amount: "25000.00",
+      "Transaction No": "0",
+    },
+    {
+      EntryDate: "8/1/26 11:28",
+      Party: "BANK CHARGES",
+      "Book Name": "Journal",
+      Type: "[01] Debit",
+      Amount: "3064.46",
+      "Transaction No": "0",
+    },
+    {
+      EntryDate: "8/1/26 11:28",
+      Party: "HDFC BHAVESHBHAI HUF",
+      "Book Name": "Salary Journal",
+      Type: "[02] Credit",
+      Amount: "3064.46",
+      "Transaction No": "0",
+    },
+  ];
+
+  it("strictly separates Debit [01] rows into Left and Credit [02] rows into Right pane without duplicates", () => {
+    const debitRows = sampleJournalRows.filter(
+      (r) => classifyLedgerEntry(r, journalCols, "Type") === "debit",
+    );
+    const creditRows = sampleJournalRows.filter(
+      (r) => classifyLedgerEntry(r, journalCols, "Type") === "credit",
+    );
+
+    expect(debitRows).toHaveLength(2);
+    expect(creditRows).toHaveLength(2);
+
+    expect(debitRows.map((r) => r.Party)).toEqual([
+      "INCOME TAX",
+      "BANK CHARGES",
+    ]);
+    expect(creditRows.map((r) => r.Party)).toEqual([
+      "HDFC BHAVESHBHAI HUF",
+      "HDFC BHAVESHBHAI HUF",
+    ]);
+
+    // Ensure mutually exclusive
+    const overlap = debitRows.filter((dr) => creditRows.includes(dr));
+    expect(overlap).toHaveLength(0);
+  });
+
+  it("resolves clean pane titles ([01] Debit / [02] Credit) instead of concatenating book names", () => {
+    const debitEntries = sampleJournalRows
+      .filter((r) => classifyLedgerEntry(r, journalCols, "Type") === "debit")
+      .map((row, index) => ({ row, index, group: "", groupId: index }));
+
+    const creditEntries = sampleJournalRows
+      .filter((r) => classifyLedgerEntry(r, journalCols, "Type") === "credit")
+      .map((row, index) => ({ row, index, group: "", groupId: index }));
+
+    const { leftTitle, rightTitle } = resolveLedgerPaneTitles({
+      isRateCut: false,
+      isFinding: false,
+      isMetalJournal: false,
+      debit: debitEntries,
+      credit: creditEntries,
+      typeCol: "Type",
+    });
+
+    // Titles must NOT be "JOURNAL / SALARY JOURNAL"
+    expect(leftTitle).not.toContain("Salary Journal");
+    expect(rightTitle).not.toContain("Salary Journal");
+
+    expect(leftTitle).toBe("[01] Debit");
+    expect(rightTitle).toBe("[02] Credit");
+  });
+
+  it("falls back to DEBIT (DR) and CREDIT (CR) for standard financial ledgers without explicit Type column", () => {
+    const debitEntries = [
+      { row: { Party: "Client A", Debit: "1000", Credit: "0" }, index: 0, group: "", groupId: 0 },
+    ];
+    const creditEntries = [
+      { row: { Party: "Client B", Debit: "0", Credit: "1000" }, index: 1, group: "", groupId: 1 },
+    ];
+
+    const { leftTitle, rightTitle } = resolveLedgerPaneTitles({
+      isRateCut: false,
+      isFinding: false,
+      isMetalJournal: false,
+      debit: debitEntries,
+      credit: creditEntries,
+    });
+
+    expect(leftTitle).toBe("DEBIT (DR)");
+    expect(rightTitle).toBe("CREDIT (CR)");
+  });
+});
+
+

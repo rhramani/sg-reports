@@ -5,6 +5,8 @@ import {
   isNumericField,
   isDateField,
   parseNumericValue,
+  getResolvedFieldValue,
+  matchFilterQuery,
   type FieldFilterRule,
 } from "./ReportFieldFilterManager";
 
@@ -82,6 +84,36 @@ describe("ReportFieldFilterManager Unit Tests", () => {
       expect(parseNumericValue("—")).toBe(null);
       expect(parseNumericValue("-")).toBe(null);
       expect(parseNumericValue(null)).toBe(null);
+    });
+
+    it("resolves field values flexibly with aliases and casing", () => {
+      const row = {
+        Party: "VISHVA GOLD",
+        "Gross Wt (2)": "125.50",
+        "Fine Wt": "99.00",
+      };
+      expect(getResolvedFieldValue(row, "Party")).toBe("VISHVA GOLD");
+      expect(getResolvedFieldValue(row, "party")).toBe("VISHVA GOLD");
+      expect(getResolvedFieldValue(row, "Party (2)")).toBe("VISHVA GOLD");
+      expect(getResolvedFieldValue(row, "Gross Wt")).toBe("125.50");
+      expect(getResolvedFieldValue(row, "Gross Wt (2)")).toBe("125.50");
+    });
+
+    it("calculates Touch dynamically if not directly present", () => {
+      const row = {
+        "Net Weight": "100.000",
+        "Pure Weight": "99.500",
+      };
+      expect(getResolvedFieldValue(row, "Touch")).toBe("99.50");
+    });
+
+    it("matches queries with numbers, commas, and case-insensitivity", () => {
+      expect(matchFilterQuery("716,400.00", "716400")).toBe(true);
+      expect(matchFilterQuery("716400", "716,400")).toBe(true);
+      expect(matchFilterQuery("100.500", "100.5")).toBe(true);
+      expect(matchFilterQuery("SHREEJI JEWELLERS", "shreeji")).toBe(true);
+      expect(matchFilterQuery("SHREEJI JEWELLERS", "jewel")).toBe(true);
+      expect(matchFilterQuery("SHREEJI JEWELLERS", "KISHAN")).toBe(false);
     });
   });
 
@@ -197,6 +229,20 @@ describe("ReportFieldFilterManager Unit Tests", () => {
       const res = filterRowsWithRules(sampleRows, rules, "all", quickFilters);
       expect(res).toHaveLength(1);
       expect(res[0].Party).toBe("KISHAN ORNAMENTS");
+    });
+
+    it("applies column search on multiple columns simultaneously", () => {
+      const quickFilters = { Party: "RAJ", "P.Type": "Purchase" };
+      const res = filterRowsWithRules(sampleRows, [], "all", quickFilters);
+      expect(res).toHaveLength(1);
+      expect(res[0]["Vou.No"]).toBe("102");
+    });
+
+    it("applies column search on numeric fields with different formatting", () => {
+      const quickFilters = { Amount: "716,400" };
+      const res = filterRowsWithRules(sampleRows, [], "all", quickFilters);
+      expect(res).toHaveLength(1);
+      expect(res[0]["Vou.No"]).toBe("101");
     });
 
     it("applies report-wide text search", () => {
