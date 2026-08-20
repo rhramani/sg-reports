@@ -544,7 +544,7 @@ function UsersContent() {
                   <UserPlus size={18} className="text-[#18476A]" />
                   Create new user
                 </h3>
-                <p className="mt-0.5 text-xs text-slate-400">User will be able to log in immediately.</p>
+                <p className="mt-0.5 text-xs text-slate-400">User will be able to log in with their full name and password.</p>
               </div>
               <button onClick={resetCreateModal} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
                 <X size={18} />
@@ -553,7 +553,7 @@ function UsersContent() {
 
             <div className="mt-5 space-y-3.5">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Full name *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Full name (Username) *</label>
                 <input
                   value={name}
                   onChange={(e) => {
@@ -671,7 +671,7 @@ function UsersContent() {
 
             <div className="mt-5 space-y-3.5">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Full name</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Full name (Username)</label>
                 <input
                   type="text"
                   value={editName}

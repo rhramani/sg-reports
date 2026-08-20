@@ -119,6 +119,30 @@ function getRowValueCaseInsensitive(row: Record<string, unknown>, targetKey: str
   return foundKey ? row[foundKey] : undefined;
 }
 
+function countRowFieldMatches(
+  rowA: Record<string, unknown>,
+  rowB: Record<string, unknown>
+): number {
+  let score = 0;
+  const keys = Object.keys(rowA).filter((k) => !k.startsWith("_"));
+  for (const k of keys) {
+    const valA = normalizeValue(rowA[k]);
+    const valB = normalizeValue(getRowValueCaseInsensitive(rowB, k));
+    if (valA && valA === valB) {
+      score += 2;
+    }
+  }
+  const typeA = normalizeValue(getRowValueCaseInsensitive(rowA, "type"));
+  const typeB = normalizeValue(getRowValueCaseInsensitive(rowB, "type"));
+  if (typeA && typeA === typeB) score += 5;
+
+  const partyA = normalizeValue(getRowValueCaseInsensitive(rowA, "party"));
+  const partyB = normalizeValue(getRowValueCaseInsensitive(rowB, "party"));
+  if (partyA && partyA === partyB) score += 3;
+
+  return score;
+}
+
 export function computeRowDiffs(
   existingRows: Record<string, unknown>[],
   newRows: Record<string, unknown>[],
@@ -138,9 +162,10 @@ export function computeRowDiffs(
     oldKeys.some((ok) => ok.trim().toLowerCase() === k.trim().toLowerCase())
   );
 
-  // 1. Dynamically find a unique matching key column if one exists in the dataset
-  let dynamicMatchKey: string | null = null;
+  const idPattern = /(id|no|num|code|ref|sr|bill|voucher|serial|trans)/i;
+  const primaryIdKeys = commonKeys.filter((k) => idPattern.test(k));
 
+  let primaryKey: string | null = null;
   for (const key of commonKeys) {
     const values = newRows
       .map((r) => r[key])
@@ -151,46 +176,76 @@ export function computeRowDiffs(
       new Set(values.map((v) => String(v).trim().toLowerCase())).size === values.length;
 
     if (isUnique) {
-      dynamicMatchKey = key;
+      primaryKey = key;
       break;
     }
   }
 
-  // 2. If no 100% unique key was found, dynamically look for any common column matching identifier patterns
-  if (!dynamicMatchKey) {
-    const idPattern = /(id|no|num|code|ref|sr|bill|voucher|serial|index)/i;
-    dynamicMatchKey = commonKeys.find((k) => idPattern.test(k)) || null;
+  if (!primaryKey && primaryIdKeys.length > 0) {
+    primaryKey = primaryIdKeys[0];
   }
 
-  // Build index map from existing DB rows if a dynamic match key was found
-  const existingMap = new Map<string, Record<string, unknown>>();
-  if (dynamicMatchKey) {
-    existingRows.forEach((row, idx) => {
-      const val = getRowValueCaseInsensitive(row, dynamicMatchKey!);
+  interface ExistingEntry {
+    row: Record<string, unknown>;
+    originalIdx: number;
+    used: boolean;
+  }
+
+  const existingKeyGroups = new Map<string, ExistingEntry[]>();
+  const allExistingEntries: ExistingEntry[] = existingRows.map((row, idx) => {
+    const entry: ExistingEntry = { row, originalIdx: idx, used: false };
+    if (primaryKey) {
+      const val = getRowValueCaseInsensitive(row, primaryKey);
       if (val !== undefined && val !== null && String(val).trim() !== "") {
-        existingMap.set(String(val).trim().toLowerCase(), row);
-      } else {
-        existingMap.set(`__idx_${idx}`, row);
+        const keyStr = String(val).trim().toLowerCase();
+        const list = existingKeyGroups.get(keyStr) || [];
+        list.push(entry);
+        existingKeyGroups.set(keyStr, list);
       }
-    });
-  }
+    }
+    return entry;
+  });
 
-  // Cross-verify incoming newRows against stored DB existingRows
   return newRows.map((newRow, idx) => {
-    let oldRow: Record<string, unknown> | undefined;
+    let matchedEntry: ExistingEntry | undefined;
 
-    if (dynamicMatchKey) {
-      const val = newRow[dynamicMatchKey];
+    if (primaryKey) {
+      const val = getRowValueCaseInsensitive(newRow, primaryKey);
       if (val !== undefined && val !== null && String(val).trim() !== "") {
-        oldRow = existingMap.get(String(val).trim().toLowerCase());
+        const keyStr = String(val).trim().toLowerCase();
+        const group = existingKeyGroups.get(keyStr);
+        if (group && group.length > 0) {
+          const unusedEntries = group.filter((e) => !e.used);
+          if (unusedEntries.length === 1) {
+            matchedEntry = unusedEntries[0];
+          } else if (unusedEntries.length > 1) {
+            let bestScore = -1;
+            let bestEntry = unusedEntries[0];
+            for (const entry of unusedEntries) {
+              let score = countRowFieldMatches(newRow, entry.row);
+              if (entry.originalIdx === idx) {
+                score += 1;
+              }
+              if (score > bestScore) {
+                bestScore = score;
+                bestEntry = entry;
+              }
+            }
+            matchedEntry = bestEntry;
+          }
+        }
       }
     }
 
-    // Fallback to row index if oldRow is not found by key
-    if (!oldRow) {
-      oldRow = existingRows[idx];
+    if (!primaryKey && !matchedEntry && allExistingEntries[idx] && !allExistingEntries[idx].used) {
+      matchedEntry = allExistingEntries[idx];
     }
 
+    if (matchedEntry) {
+      matchedEntry.used = true;
+    }
+
+    const oldRow = matchedEntry?.row;
     const mergedRow: Record<string, unknown> = { ...newRow };
     delete mergedRow._isModified;
     delete mergedRow._diff;
@@ -798,26 +853,7 @@ reportsRouter.post("/", authenticateToken, async (req: AuthRequest, res) => {
     }
 
     // 4. Create new report document
-    let newReportData = enriched.data || [];
-    try {
-      const priorReport = await ReportModel.findOne({
-        $or: [
-          { name: { $regex: `^${escapeRegex(cleanName)}$`, $options: "i" } },
-          { type: { $regex: `^${escapeRegex(cleanName)}$`, $options: "i" } },
-        ],
-        createdAt: { $lt: dayStart },
-      }).sort({ createdAt: -1, updatedAt: -1, _id: -1 });
-
-      if (priorReport && Array.isArray(priorReport.data) && priorReport.data.length > 0) {
-        newReportData = computeRowDiffs(
-          priorReport.data as Record<string, unknown>[],
-          newReportData,
-          uploaderName
-        );
-      }
-    } catch (err) {
-      console.warn("Failed to compare new report against prior report:", err);
-    }
+    const newReportData = enriched.data || [];
 
     const reportId = `REP-${Date.now().toString(36).toUpperCase()}`;
     const newReport = await ReportModel.create({
@@ -1050,12 +1086,12 @@ reportsRouter.post("/:id/approvals", async (req: AuthRequest, res) => {
         .json({ success: false, error: "Report not found for approval." });
     }
 
-    // Build a map from rowIndex → rowId for quick lookup
-    const entryMap = new Map<number, string | undefined>();
+    // Build a map from rowIndex → { rowId, approvedBy } for quick lookup
+    const entryMap = new Map<number, { rowId?: string; approvedBy?: string }>();
     if (Array.isArray(selectedEntries)) {
-      selectedEntries.forEach((e: { rowIndex: number; rowId?: string }) => {
+      selectedEntries.forEach((e: { rowIndex: number; rowId?: string; approvedBy?: string }) => {
         if (typeof e.rowIndex === "number") {
-          entryMap.set(e.rowIndex, e.rowId);
+          entryMap.set(e.rowIndex, { rowId: e.rowId, approvedBy: e.approvedBy });
         }
       });
     }
@@ -1076,13 +1112,14 @@ reportsRouter.post("/:id/approvals", async (req: AuthRequest, res) => {
       }
     });
 
-    // Replace approvals entirely with the current selected set
+    // Replace approvals entirely with the current selected set, preserving individual approver names
     const newApprovals = selectedIndexes.map((idx: number) => {
       const existing = existingMap.get(idx);
+      const entry = entryMap.get(idx);
       return {
         rowIndex: idx,
-        rowId: entryMap.get(idx) ?? existing?.rowId,
-        approvedBy: existing?.approvedBy ?? approver,
+        rowId: entry?.rowId ?? existing?.rowId,
+        approvedBy: entry?.approvedBy || existing?.approvedBy || approver,
         approvedAt: existing?.approvedAt ?? now,
       };
     });

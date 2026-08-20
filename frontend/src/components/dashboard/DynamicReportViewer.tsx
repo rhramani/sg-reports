@@ -28,6 +28,12 @@ import type {
   PermissionActions,
   ReportItem,
 } from "@shared/api";
+import {
+  ReportFieldFilterManager,
+  type FieldFilterRule,
+  type MatchMode,
+  filterRowsWithRules,
+} from "./ReportFieldFilterManager";
 
 // ── Entry Color Palette System ─────────────────────────────────────────────
 export type EntryColorPaletteKey =
@@ -60,13 +66,13 @@ export const ENTRY_COLOR_PALETTES: Record<
     bands: [
       {
         base: "bg-white",
-        hover: "hover:bg-slate-100/70",
+        hover: "",
         border: "border-l-0",
         badge: "bg-slate-100 text-slate-700 border-slate-200",
       },
       {
         base: "bg-[#f4f6f8]",
-        hover: "hover:bg-[#e9ecef]",
+        hover: "",
         border: "border-l-0",
         badge: "bg-slate-200 text-slate-800 border-slate-300",
       },
@@ -79,13 +85,13 @@ export const ENTRY_COLOR_PALETTES: Record<
     bands: [
       {
         base: "bg-white",
-        hover: "hover:bg-sky-50/70",
+        hover: "",
         border: "border-l-0",
         badge: "bg-sky-50 text-sky-700 border-sky-200",
       },
       {
         base: "bg-[#f0f7ff]",
-        hover: "hover:bg-[#e1f0ff]",
+        hover: "",
         border: "border-l-0",
         badge: "bg-sky-100 text-sky-800 border-sky-300",
       },
@@ -98,13 +104,13 @@ export const ENTRY_COLOR_PALETTES: Record<
     bands: [
       {
         base: "bg-white",
-        hover: "hover:bg-emerald-50/60",
+        hover: "",
         border: "border-l-0",
         badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
       },
       {
         base: "bg-[#f0fdf4]",
-        hover: "hover:bg-[#dcfce7]",
+        hover: "",
         border: "border-l-0",
         badge: "bg-emerald-100 text-emerald-800 border-emerald-300",
       },
@@ -117,13 +123,13 @@ export const ENTRY_COLOR_PALETTES: Record<
     bands: [
       {
         base: "bg-[#f4f8ff]",
-        hover: "hover:bg-[#e6f0ff]",
+        hover: "",
         border: "border-l-0",
         badge: "bg-indigo-100 text-indigo-700 border-indigo-200",
       },
       {
         base: "bg-[#fff9f0]",
-        hover: "hover:bg-[#fff2e0]",
+        hover: "",
         border: "border-l-0",
         badge: "bg-amber-100 text-amber-800 border-amber-200",
       },
@@ -136,7 +142,7 @@ export const ENTRY_COLOR_PALETTES: Record<
     bands: [
       {
         base: "bg-white",
-        hover: "hover:bg-slate-50",
+        hover: "",
         border: "border-l-0",
         badge: "bg-slate-100 text-slate-600 border-slate-200",
       },
@@ -417,6 +423,10 @@ function computeRowGroups(
 
 function detectNumericColumns(rows: Record<string, any>[], columns: string[]) {
   return columns.filter((col) => {
+    if (/touch|tch|purity|kdm|fineness|rate\s*cut|rat\s*cut/i.test(col)) {
+      return false;
+    }
+
     if (
       /trans|voucher|vou|doc|ref|no|num|code|id|item|name|book|party|account|date|time|phone|mobile|sr|sl|serial|loss|brk|miss|type|status|narration|remarks/i.test(
         col,
@@ -995,6 +1005,162 @@ export function calculateOverallPurity(
   return "—";
 }
 
+export function calculateRowTouch(
+  row: Record<string, any>,
+  columns: string[],
+): string {
+  const touchKey = columns.find((c) =>
+    /^touch$|^tch$|^touch\s*%$|^purity$|^purity\s*%$|^kdm$|^fineness$/i.test(
+      c.trim(),
+    ),
+  );
+  if (touchKey && row[touchKey] !== undefined && row[touchKey] !== null) {
+    const rawVal = String(row[touchKey]).trim();
+    if (
+      rawVal !== "" &&
+      rawVal !== "—" &&
+      rawVal !== "-" &&
+      rawVal.toLowerCase() !== "null" &&
+      rawVal.toLowerCase() !== "undefined"
+    ) {
+      const cleaned = rawVal.replace(/%/g, "").trim();
+      const num = Number(cleaned);
+      if (Number.isFinite(num) && num > 0) {
+        return rawVal.includes("%") ? rawVal : `${num.toFixed(2)}%`;
+      }
+    }
+  }
+
+  const parseNum = (value: any): number => {
+    if (value === null || value === undefined) return 0;
+    const str = String(value).trim();
+    if (
+      str === "" ||
+      str === "—" ||
+      str === "-" ||
+      str.toLowerCase() === "null" ||
+      str.toLowerCase() === "undefined"
+    ) {
+      return 0;
+    }
+    const cleaned = str.replace(/,/g, "").replace(/[^0-9.-]/g, "");
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : 0;
+  };
+
+  const netWtCol =
+    columns.find((c) => /^net\s*wt|^net\s*weight$/i.test(c.trim())) ||
+    columns.find((c) => /^weight$/i.test(c.trim())) ||
+    columns.find((c) => /net.*wt|weight/i.test(c.trim()));
+
+  const pureWtCol =
+    columns.find((c) =>
+      /^pure\s*wt|^pure\s*weight|^fine\s*wt|^fine\s*weight$/i.test(c.trim()),
+    ) || columns.find((c) => /pure.*wt|fine.*wt/i.test(c.trim()));
+
+  const net = netWtCol
+    ? parseNum(row[netWtCol])
+    : parseNum(row["Net Weight"] || row["Net Wt"] || row["Weight"]);
+  const pure = pureWtCol
+    ? parseNum(row[pureWtCol])
+    : parseNum(
+        row["Pure Weight"] ||
+          row["Pure Wt"] ||
+          row["Fine Wt"] ||
+          row["Fine Weight"],
+      );
+
+  if (net > 0 && pure > 0) {
+    const t = (pure / net) * 100;
+    return `${t.toFixed(2)}%`;
+  }
+
+  return "—";
+}
+
+export function calculateOverallTouch(
+  targetRows: Record<string, any>[],
+  columns: string[],
+): string {
+  if (!targetRows || targetRows.length === 0) return "—";
+
+  const parseNum = (value: any): number => {
+    if (value === null || value === undefined) return 0;
+    const str = String(value).trim();
+    if (
+      str === "" ||
+      str === "—" ||
+      str === "-" ||
+      str.toLowerCase() === "null" ||
+      str.toLowerCase() === "undefined"
+    ) {
+      return 0;
+    }
+    const cleaned = str.replace(/,/g, "").replace(/[^0-9.-]/g, "");
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : 0;
+  };
+
+  const netWtCol =
+    columns.find((c) => /^net\s*wt|^net\s*weight$/i.test(c.trim())) ||
+    columns.find((c) => /^weight$/i.test(c.trim())) ||
+    columns.find((c) => /net.*wt|weight/i.test(c.trim()));
+
+  const pureWtCol =
+    columns.find((c) =>
+      /^pure\s*wt|^pure\s*weight|^fine\s*wt|^fine\s*weight$/i.test(c.trim()),
+    ) || columns.find((c) => /pure.*wt|fine.*wt/i.test(c.trim()));
+
+  const touchCol = columns.find((c) =>
+    /^touch$|^tch$|^touch\s*%$|^purity$|^purity\s*%$|^kdm$|^fineness$/i.test(
+      c.trim(),
+    ),
+  );
+
+  let pureSum = 0;
+  let netSum = 0;
+  let touchSum = 0;
+  let touchCount = 0;
+  let weightedTouchSum = 0;
+
+  targetRows.forEach((r) => {
+    const net = netWtCol
+      ? parseNum(r[netWtCol])
+      : parseNum(r["Net Weight"] || r["Net Wt"] || r["Weight"]);
+    const pure = pureWtCol
+      ? parseNum(r[pureWtCol])
+      : parseNum(
+          r["Pure Weight"] ||
+            r["Pure Wt"] ||
+            r["Fine Wt"] ||
+            r["Fine Weight"],
+        );
+    const tch = touchCol
+      ? parseNum(r[touchCol])
+      : parseNum(r["Touch"] || r["Purity"] || r["Tch"]);
+
+    if (pure > 0) pureSum += pure;
+    if (net > 0) netSum += net;
+    if (tch > 0) {
+      touchSum += tch;
+      touchCount++;
+      if (net > 0) weightedTouchSum += tch * net;
+      else weightedTouchSum += tch;
+    }
+  });
+
+  if (pureSum > 0 && netSum > 0) {
+    return `${((pureSum / netSum) * 100).toFixed(2)}%`;
+  }
+  if (netSum > 0 && weightedTouchSum > 0) {
+    return `${(weightedTouchSum / netSum).toFixed(2)}%`;
+  }
+  if (touchCount > 0) {
+    return `${(touchSum / touchCount).toFixed(2)}%`;
+  }
+  return "—";
+}
+
 export function buildDisplayHeaderGroups(
   groups: MainHeaderGroup[],
   displayColumns: string[],
@@ -1018,7 +1184,7 @@ export function buildDisplayHeaderGroups(
   };
 
   displayColumns.forEach((colKey) => {
-    if (colKey === extraColumnKey) {
+    if (colKey === extraColumnKey || colKey === "Touch" || colKey === "Purity") {
       pushOrExtend(undefined);
       return;
     }
@@ -1265,7 +1431,14 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
     }
   });
 
+  const isFindingReport =
+    headers.some((h) => /finding/i.test(h)) ||
+    parsed.some((r) =>
+      Object.values(r).some((v) => /finding/i.test(String(v))),
+    );
+
   const isRateCutReport =
+    isFindingReport ||
     headers.some((h) =>
       /rate\s*cut|purchase.*rate|sale.*rate|rat\s*cut/i.test(h),
     ) ||
@@ -1302,18 +1475,19 @@ export function scanAndAnalyzeXlsx(sheet: XLSX.WorkSheet): AnalyzedXlsxResult {
     layoutMode = "ledger";
   }
 
-
   const detectedReportType = isMeltingReport
     ? "Metal Melting / In-Out Balance Report"
-    : isRateCutReport
-      ? "Rate Cut Purchase & Sale Ledger"
-      : hasCreditDebitCols
-        ? isMultiLevel
-          ? "Metal Journal Receive / Return Ledger"
-          : "Credit / Debit Financial Ledger"
-        : isMultiLevel
-          ? `Multi-Level Table (${headerLevels.length + 1} Header Tiers)`
-          : "Standard Tabular Spreadsheet";
+    : isFindingReport
+      ? "Finding Purchase & Sale Ledger"
+      : isRateCutReport
+        ? "Rate Cut Purchase & Sale Ledger"
+        : hasCreditDebitCols
+          ? isMultiLevel
+            ? "Metal Journal Receive / Return Ledger"
+            : "Credit / Debit Financial Ledger"
+          : isMultiLevel
+            ? `Multi-Level Table (${headerLevels.length + 1} Header Tiers)`
+            : "Standard Tabular Spreadsheet";
 
   const headerStructure: HeaderStructure = {
     isMultiLevel,
@@ -1498,6 +1672,222 @@ export function pairAndAlignLedgerEntries(
   return { alignedDebit, alignedCredit, matchedCount };
 }
 
+/**
+ * Consolidates multiple report uploads of the same report type into a single unified report
+ * across the selected date range, combining all entries chronologically, mapping approvals,
+ * and maintaining full data integrity.
+ */
+export function consolidateReportsByType(
+  reports: ReportItem[],
+  startDate?: string,
+  endDate?: string,
+): ReportItem[] {
+  if (!reports || reports.length === 0) return [];
+
+  // Group reports by canonical report name/type
+  const groups = new Map<string, ReportItem[]>();
+  reports.forEach((rep) => {
+    const rawKey = (rep.type || rep.name || "Report").trim();
+    const canonicalKey = rawKey.toLowerCase();
+    const existing = groups.get(canonicalKey) || [];
+    existing.push(rep);
+    groups.set(canonicalKey, existing);
+  });
+
+  const result: ReportItem[] = [];
+
+  groups.forEach((groupReps, key) => {
+    if (groupReps.length === 1) {
+      const single = groupReps[0];
+      const singleData = Array.isArray(single.data) ? single.data : [];
+      const repDateStr = single.createdAt
+        ? String(single.createdAt).split("T")[0]
+        : "";
+      const enrichedData = singleData.map((row, idx) => ({
+        ...row,
+        _originalIndex: idx,
+        _sourceReportId: String(single._id || single.reportId || ""),
+        _sourceReportName: single.name,
+        _sourceReportDate: repDateStr,
+        _sourceLocalIndex: idx,
+      }));
+
+      result.push({
+        ...single,
+        data: enrichedData,
+        _isConsolidated: false,
+        _sourceReportIds: [
+          String(single._id || single.reportId || ""),
+        ].filter(Boolean),
+        _reportCount: 1,
+      } as ReportItem);
+      return;
+    }
+
+    // Sort reports chronologically (earliest to latest so logs/journals follow sequential order)
+    const sorted = [...groupReps].sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+
+    const primary = sorted[0];
+    const sourceIds = sorted
+      .map((r) => String(r._id || r.reportId || ""))
+      .filter(Boolean);
+
+    // Merge headers in order of occurrence without duplicates
+    const headersSet = new Set<string>();
+    sorted.forEach((r) => {
+      (r.headers || []).forEach((h) => {
+        if (h && !h.startsWith("_")) headersSet.add(h);
+      });
+      if (Array.isArray(r.data)) {
+        r.data.forEach((row) => {
+          Object.keys(row).forEach((k) => {
+            if (k && !k.startsWith("_")) headersSet.add(k);
+          });
+        });
+      }
+    });
+
+    // Check if any report or entry has a Date column
+    const existingDateCol = Array.from(headersSet).find((h) =>
+      /^(date|vch\s*date|bill\s*date|entry\s*date|doc\s*date)$/i.test(h.trim()),
+    );
+    if (!existingDateCol) {
+      headersSet.add("Date");
+    }
+
+    const unifiedHeaders = Array.from(headersSet);
+
+    // Best header structure
+    const bestStructure =
+      sorted.find((r) => r.headerStructure?.isMultiLevel)?.headerStructure ||
+      primary.headerStructure;
+
+    // Merge rows and map approvals
+    let globalIdx = 0;
+    const mergedData: Record<string, unknown>[] = [];
+    const mergedApprovals: any[] = [];
+
+    sorted.forEach((rep) => {
+      const repId = String(rep._id || rep.reportId || "");
+      const repApprovals = Array.isArray((rep as any).approvals)
+        ? (rep as any).approvals
+        : [];
+      const repDate = rep.createdAt
+        ? String(rep.createdAt).split("T")[0]
+        : "";
+
+      const formatDateStr = (ds?: string) => {
+        if (!ds) return "";
+        const parts = ds.split("-");
+        return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : ds;
+      };
+
+      const formattedRepDate = formatDateStr(repDate);
+
+      if (Array.isArray(rep.data)) {
+        rep.data.forEach((row, localIdx) => {
+          const rowCopy: Record<string, unknown> = {
+            ...row,
+            _originalIndex: globalIdx,
+            _sourceReportId: repId,
+            _sourceReportName: rep.name,
+            _sourceReportDate: repDate,
+            _sourceLocalIndex:
+              typeof (row as any)._originalIndex === "number"
+                ? (row as any)._originalIndex
+                : localIdx,
+          };
+
+          // If no date column existed originally, populate Date
+          if (!existingDateCol && formattedRepDate) {
+            rowCopy["Date"] = formattedRepDate;
+          } else if (existingDateCol && formattedRepDate) {
+            if (
+              rowCopy[existingDateCol] === undefined ||
+              rowCopy[existingDateCol] === null ||
+              rowCopy[existingDateCol] === "" ||
+              rowCopy[existingDateCol] === "—"
+            ) {
+              rowCopy[existingDateCol] = formattedRepDate;
+            }
+          }
+
+          mergedData.push(rowCopy);
+
+          // Map approvals to new global index
+          const matchedApp = repApprovals.find(
+            (a: any) =>
+              a.rowIndex === localIdx ||
+              (a.rowId && a.rowId === (row as any)._rowId),
+          );
+          if (matchedApp) {
+            mergedApprovals.push({
+              ...matchedApp,
+              rowIndex: globalIdx,
+            });
+          }
+
+          globalIdx++;
+        });
+      }
+    });
+
+    // Distinct owners
+    const ownersList = Array.from(
+      new Set(sorted.map((r) => r.owner).filter(Boolean)),
+    );
+    const combinedOwners = ownersList.join(", ") || "User";
+
+    // Date range label
+    const sortedDates = sorted
+      .map((r) => (r.createdAt ? String(r.createdAt).split("T")[0] : ""))
+      .filter(Boolean)
+      .sort();
+    const minDateStr = startDate || sortedDates[0];
+    const maxDateStr = endDate || sortedDates[sortedDates.length - 1];
+
+    const formatDateVal = (ds?: string) => {
+      if (!ds) return "";
+      const parts = ds.split("-");
+      return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : ds;
+    };
+
+    let dateRangeLabel = "";
+    if (minDateStr && maxDateStr && minDateStr !== maxDateStr) {
+      dateRangeLabel = `From: ${formatDateVal(minDateStr)} To: ${formatDateVal(maxDateStr)}`;
+    } else if (minDateStr) {
+      dateRangeLabel = formatDateVal(minDateStr);
+    }
+
+    result.push({
+      _id: `consolidated-${key}-${sourceIds.join("-")}`,
+      reportId: `consolidated-${key}`,
+      name: primary.name || primary.type || "Report",
+      type: primary.type || primary.name || "Report",
+      source: "Consolidated Date Range",
+      owner: combinedOwners,
+      ownerRole: primary.ownerRole || "User",
+      status: "Pending",
+      rowsCount: mergedData.length,
+      data: mergedData,
+      headers: unifiedHeaders,
+      headerStructure: bestStructure,
+      approvals: mergedApprovals,
+      createdAt: primary.createdAt,
+      _isConsolidated: true,
+      _sourceReportIds: sourceIds,
+      _reportCount: sorted.length,
+      _dateRangeLabel: dateRangeLabel,
+    } as ReportItem);
+  });
+
+  return result;
+}
+
 interface LedgerPaneProps {
   title: string;
   tone: "debit" | "credit";
@@ -1508,6 +1898,7 @@ interface LedgerPaneProps {
   amountKey: string;
   numericKeys: string[];
   selected: number[];
+  approvedByMap?: Record<number, string>;
   toggleApproval: (index: number) => void;
   getRelatedGroupIndices?: (index: number) => number[];
   entryColorPalette?: EntryColorPaletteKey;
@@ -1542,6 +1933,7 @@ function LedgerPane({
   amountKey,
   numericKeys,
   selected,
+  approvedByMap = {},
   toggleApproval,
   getRelatedGroupIndices,
   entryColorPalette = "classic",
@@ -1572,10 +1964,8 @@ function LedgerPane({
       maximumFractionDigits: 3,
     });
 
-  const toneText = isDebit ? "text-[#126c65]" : "text-[#8f5039]";
-  const toneHeaderBorder = isDebit
-    ? "border-[#b9d0cc] bg-[#dcece9]"
-    : "border-[#d9c2b5] bg-[#ead8ce]";
+  const toneText = "text-slate-900";
+  const toneHeaderBorder = "border-slate-300 bg-[#d1d1d1]";
 
   const paneGrandTotal: Record<string, number> = {};
   numericKeys.forEach((nk) => (paneGrandTotal[nk] = 0));
@@ -1648,8 +2038,8 @@ function LedgerPane({
 
   return (
     <div
-      className={`min-w-[420px] flex-1 ${
-        isDebit ? "bg-[#f3f8f7]" : "border-r border-[#c8b3a7] bg-[#faf5f2]"
+      className={`min-w-[420px] flex-1 bg-white ${
+        isDebit ? "border-r-2 border-slate-300" : ""
       }`}
     >
       <div
@@ -1672,11 +2062,11 @@ function LedgerPane({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="max-h-[560px] overflow-auto"
+        className="max-h-[560px] overflow-auto pb-4"
       >
         <table className="w-full min-w-full border-separate border-spacing-0 text-left">
           <thead className="sticky top-0 z-20">
-            <tr className="bg-[#18476A] text-[10.5px] font-bold uppercase tracking-[0.08em] text-white">
+            <tr className="bg-white text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-900">
               {(() => {
                 const paneIndices = activeRows.map((r) => r.index);
                 const isAllPaneSelected =
@@ -1702,17 +2092,17 @@ function LedgerPane({
                   }
                 };
                 return (
-                  <th className="sticky left-0 top-0 z-30 border-r border-b border-white/20 bg-[#18476A] px-3 py-2.5 whitespace-nowrap align-middle">
+                  <th className="sticky left-0 top-0 z-30 border-r border-b border-slate-300 bg-white px-3 py-2.5 whitespace-nowrap align-middle">
                     <div className="flex items-center gap-1.5 whitespace-nowrap">
                       <button
                         type="button"
                         onClick={toggleSelectPane}
                         className={`grid h-4 w-4 place-items-center rounded border transition ${
                           isAllPaneSelected
-                            ? "border-emerald-400 bg-emerald-500 text-white"
+                            ? "border-[#0977f0] bg-[#0977f0] text-white"
                             : isSomePaneSelected
-                              ? "border-emerald-400 bg-emerald-100 text-emerald-800"
-                              : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                              ? "border-[#0977f0] bg-blue-100 text-[#0977f0]"
+                              : "border-slate-400 bg-white text-transparent hover:border-slate-600"
                         }`}
                         title={
                           isAllPaneSelected
@@ -1728,7 +2118,7 @@ function LedgerPane({
                           <Check size={11} strokeWidth={3} />
                         )}
                       </button>
-                      <span className="text-white font-bold text-[10.5px] uppercase whitespace-nowrap">
+                      <span className="text-slate-900 font-bold text-[10.5px] uppercase whitespace-nowrap">
                         Check
                       </span>
                     </div>
@@ -1740,7 +2130,7 @@ function LedgerPane({
                 return (
                   <th
                     key={column}
-                    className="border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 whitespace-nowrap align-middle"
+                    className="border-r border-b border-slate-300 bg-white px-3.5 py-2.5 whitespace-nowrap align-middle"
                   >
                     {colLabel}
                   </th>
@@ -1751,7 +2141,7 @@ function LedgerPane({
                 return (
                   <th
                     key={nk}
-                    className="border-r border-b border-white/20 bg-[#18476A] px-3.5 py-2.5 text-right whitespace-nowrap align-middle"
+                    className="border-r border-b border-slate-300 bg-white px-3.5 py-2.5 text-right whitespace-nowrap align-middle"
                   >
                     {colLabel}
                   </th>
@@ -1765,9 +2155,9 @@ function LedgerPane({
                 return (
                   <tr
                     key={`placeholder-${item.index}`}
-                    className="h-[41px] bg-slate-50/40 border-t border-slate-200/80 border-b border-slate-200/60"
+                    className="min-h-[44px] bg-slate-50/40 border-b border-slate-200"
                   >
-                    <td className="sticky left-0 bg-inherit px-3.5 py-2.5 align-middle whitespace-nowrap text-center text-slate-300">
+                    <td className="sticky left-0 bg-inherit px-3.5 pt-2.5 pb-4 align-top whitespace-nowrap text-center text-slate-300 border-r border-b border-slate-200">
                       <div className="flex items-center justify-center h-4 text-slate-300 select-none text-xs font-mono">
                         —
                       </div>
@@ -1775,7 +2165,7 @@ function LedgerPane({
                     {textColumns.map((col) => (
                       <td
                         key={col}
-                        className="whitespace-nowrap px-3.5 py-2.5 align-middle text-xs text-slate-300 select-none font-mono"
+                        className="whitespace-nowrap px-3.5 pt-2.5 pb-4 align-top text-xs text-slate-300 select-none font-mono border-r border-b border-slate-200"
                       >
                         —
                       </td>
@@ -1783,7 +2173,7 @@ function LedgerPane({
                     {activeNumericKeys.map((nk) => (
                       <td
                         key={nk}
-                        className="whitespace-nowrap px-3.5 py-2.5 text-right align-middle text-xs text-slate-300 select-none font-mono"
+                        className="whitespace-nowrap px-3.5 pt-2.5 pb-4 text-right align-top text-xs text-slate-300 select-none font-mono border-r border-b border-slate-200"
                       >
                         —
                       </td>
@@ -1809,7 +2199,17 @@ function LedgerPane({
               const band = getEntryBandStyle(bandIndex, entryColorPalette);
               const user = getAuthUser();
               const currentUserName =
-                user?.name || user?.email?.split("@")[0] || "BHAVESH";
+                user?.name || user?.email?.split("@")[0] || "User";
+              const approverName =
+                approvedByMap[index] ||
+                row["Checked By"] ||
+                row["CheckedBy"] ||
+                row["Approved By"] ||
+                row["ApprovedBy"] ||
+                row["User"] ||
+                row["Audit User"] ||
+                row._approvedBy ||
+                currentUserName;
 
               const isRowModified = Boolean(row._isModified);
               const isNewRowEntry = Boolean(row._isNewEntry);
@@ -1817,69 +2217,63 @@ function LedgerPane({
               return (
                 <tr
                   key={`${group}-${index}`}
-                  onMouseEnter={() => {
-                    if (matchedPairId) onHoverPair?.(matchedPairId);
-                  }}
-                  onMouseLeave={() => {
-                    if (matchedPairId) onHoverPair?.(null);
-                  }}
-                  className={`h-[41px] transition-all duration-150 ${
-                    isPairHovered
-                      ? "bg-emerald-100/90 ring-2 ring-emerald-500/80 shadow-md z-10"
-                      : isRowApproved
-                        ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
-                        : isRowModified
-                          ? "bg-amber-50/90 hover:bg-amber-100/90 border-l-4 border-l-amber-500 shadow-2xs"
-                          : isNewRowEntry
-                            ? "bg-emerald-50/80 hover:bg-emerald-100/80 border-l-4 border-l-emerald-500"
-                            : `${band.base} ${band.hover}`
+                  className={`min-h-[44px] ${
+                    isRowApproved
+                      ? "bg-[#9f674e] text-[#241209]"
+                      : isRowModified
+                        ? "bg-amber-50/90 border-l-4 border-l-amber-500 shadow-2xs"
+                        : isNewRowEntry
+                          ? "bg-emerald-50/80 border-l-4 border-l-emerald-500"
+                          : band.base
                   } ${
                     isNewEntryStart
-                      ? "border-t border-slate-300/90"
-                      : "border-t border-slate-200/80"
-                  } border-b border-slate-200/60`}
+                      ? "border-t-2 border-slate-400"
+                      : "border-t border-slate-200"
+                  } border-b border-slate-200`}
                 >
                   <td
-                    className={`sticky left-0 bg-inherit px-3.5 py-2.5 align-middle whitespace-nowrap ${
+                    className={`sticky left-0 bg-inherit px-3.5 pt-2.5 pb-4 align-top whitespace-nowrap border-r border-b border-slate-300 ${
                       !isRowApproved && entryColorPalette !== "none"
                         ? band.border
                         : ""
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 whitespace-nowrap h-4">
-                      <button
-                        type="button"
-                        onClick={() => toggleApproval(index)}
-                        title={
-                          isRowApproved
-                            ? `Row #${index + 1} Selected - click to deselect`
-                            : `Select Row #${index + 1}`
-                        }
-                        className={`grid h-4 w-4 place-items-center rounded border transition ${
-                          isRowApproved
-                            ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
-                            : "border-slate-400 bg-white text-transparent hover:border-slate-600"
-                        }`}
-                      >
-                        {isRowApproved ? (
-                          <Check size={12} strokeWidth={3} />
-                        ) : (
-                          <Check size={12} strokeWidth={3} />
-                        )}
-                      </button>
-                      {isNewEntryStart && canDelete && onDeleteRow && (
+                    <div className="flex flex-col items-start gap-1 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => onDeleteRow(index)}
-                          className="p-0.5 text-slate-400 hover:text-rose-600 transition rounded hover:bg-rose-50"
-                          title="Delete entry"
+                          onClick={() => toggleApproval(index)}
+                          title={
+                            isRowApproved
+                              ? `Row #${index + 1} Selected - click to deselect`
+                              : `Select Row #${index + 1}`
+                          }
+                          className={`grid h-4 w-4 place-items-center rounded border transition ${
+                            isRowApproved
+                              ? "border-[#0977f0] bg-[#0977f0] text-white shadow-xs"
+                              : "border-slate-400 bg-white text-transparent hover:border-slate-600"
+                          }`}
                         >
-                          <Trash2 size={13} />
+                          {isRowApproved ? (
+                            <Check size={12} strokeWidth={3} />
+                          ) : (
+                            <Check size={12} strokeWidth={3} />
+                          )}
                         </button>
-                      )}
+                        {isNewEntryStart && canDelete && onDeleteRow && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteRow(index)}
+                            className="p-0.5 text-slate-400 hover:text-rose-600 transition rounded hover:bg-rose-50"
+                            title="Delete entry"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
                       {isRowApproved && (
-                        <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
-                          By - {currentUserName}
+                        <span className="text-[11.5px] text-inherit whitespace-nowrap leading-tight">
+                          By - {approverName}
                         </span>
                       )}
                       {isNewEntryStart && isRowModified && (
@@ -1921,7 +2315,7 @@ function LedgerPane({
                       return (
                         <td
                           key={column}
-                          className="whitespace-nowrap px-3 py-2 align-middle text-xs font-medium bg-amber-100/40 text-slate-900"
+                          className="whitespace-nowrap px-3.5 pt-2.5 pb-4 align-top text-xs font-medium bg-amber-100/40 text-slate-900 border-r border-b border-slate-200"
                         >
                           <div className="group relative inline-flex items-center gap-1.5 justify-start w-full">
                             <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-bold text-amber-950 border border-amber-300 shadow-2xs">
@@ -1963,7 +2357,9 @@ function LedgerPane({
                     return (
                       <td
                         key={column}
-                        className="whitespace-nowrap px-3.5 py-2.5 align-middle text-xs font-medium text-slate-700"
+                        className={`whitespace-nowrap px-3.5 pt-2.5 pb-4 align-top text-xs font-medium border-r border-b border-slate-200 ${
+                          isRowApproved ? "text-[#241209]" : "text-slate-700"
+                        }`}
                       >
                         {valNode}
                       </td>
@@ -1988,7 +2384,7 @@ function LedgerPane({
                       return (
                         <td
                           key={nk}
-                          className="whitespace-nowrap px-3 py-2 text-right align-middle text-xs font-bold bg-amber-100/40 text-amber-950"
+                          className="whitespace-nowrap px-3.5 pt-2.5 pb-4 text-right align-top text-xs font-bold bg-amber-100/40 text-amber-950 border-r border-b border-slate-200"
                         >
                           <div className="group relative inline-flex items-center gap-1.5 justify-end w-full">
                             <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-mono font-bold text-amber-950 border border-amber-300 shadow-2xs">
@@ -2030,7 +2426,9 @@ function LedgerPane({
                     return (
                       <td
                         key={nk}
-                        className="whitespace-nowrap px-3.5 py-2.5 text-right align-middle text-xs font-medium text-slate-700 font-mono"
+                        className={`whitespace-nowrap px-3.5 pt-2.5 pb-4 text-right align-top text-xs font-medium font-mono border-r border-b border-slate-200 ${
+                          isRowApproved ? "text-[#241209]" : "text-slate-700"
+                        }`}
                       >
                         {valNode}
                       </td>
@@ -2058,6 +2456,7 @@ interface LedgerTableViewProps {
   typeKey: string;
   amountKey: string;
   selected: number[];
+  approvedByMap?: Record<number, string>;
   toggleApproval: (index: number) => void;
   getRelatedGroupIndices?: (index: number) => number[];
   rowGroupMeta?: Map<number, GroupedRowMeta>;
@@ -2076,6 +2475,7 @@ function LedgerTableView({
   typeKey,
   amountKey,
   selected,
+  approvedByMap = {},
   toggleApproval,
   getRelatedGroupIndices,
   rowGroupMeta,
@@ -2141,6 +2541,18 @@ function LedgerTableView({
       /type|category|nature|dr.?cr|credit.?debit|p\.?type|inout/i.test(col),
     );
 
+  const isFinding = useMemo(() => {
+    const nameStr = (fileName || reportName || "").toLowerCase();
+    const metaType = (reportType || "").toLowerCase();
+    return (
+      nameStr.includes("finding") ||
+      metaType.includes("finding") ||
+      rows.some((r) =>
+        Object.values(r).some((v) => /finding/i.test(String(v))),
+      )
+    );
+  }, [fileName, reportName, reportType, rows]);
+
   const isRateCut = useMemo(() => {
     const nameStr = (fileName || reportName || "").toLowerCase();
     const metaType = (reportType || "").toLowerCase();
@@ -2150,13 +2562,15 @@ function LedgerTableView({
       cleanName(nameStr).includes("ratecut") ||
       cleanName(nameStr).includes("ratcut") ||
       cleanName(metaType).includes("ratecut") ||
-      cleanName(metaType).includes("ratcut")
+      cleanName(metaType).includes("ratcut") ||
+      cleanName(nameStr).includes("finding") ||
+      cleanName(metaType).includes("finding")
     ) {
       return true;
     }
 
     return (
-      displayCols.some((c) => /rate\s*cut|rat\s*cut/i.test(c)) ||
+      displayCols.some((c) => /rate\s*cut|rat\s*cut|finding/i.test(c)) ||
       rows.some((r) => {
         const val = String(
           r["Book Name"] ||
@@ -2169,12 +2583,13 @@ function LedgerTableView({
         if (
           val.includes("rate cut") ||
           val.includes("ratecut") ||
-          val.includes("rat cut")
+          val.includes("rat cut") ||
+          val.includes("finding")
         ) {
           return true;
         }
         return Object.values(r).some((v) =>
-          /rate\s*cut|rat\s*cut|purchase\s*rate|sale\s*rate/i.test(String(v)),
+          /rate\s*cut|rat\s*cut|purchase\s*rate|sale\s*rate|finding/i.test(String(v)),
         );
       })
     );
@@ -2526,11 +2941,11 @@ function LedgerTableView({
   // Additional dynamic calculation for Rate Cut or multi-numeric column ledgers
   const rateCutMetrics = useMemo(() => {
     if (!isRateCut) return [];
-    // Filter out Amount since Amount is already displayed in the main Sub Total / TOTAL SALE / TOTAL PURCHASE rows!
+    // Filter out Amount and Touch/Purity since they have dedicated summary rows
     const nonAmtCols = displayCols.filter(
       (c) =>
         /net.*wt|weight|fine|pure.*wt/i.test(c.trim()) &&
-        !/rate|price|amount|amt/i.test(c.trim()),
+        !/rate|price|amount|amt|touch|tch|purity|kdm|fineness/i.test(c.trim()),
     );
     const colsToSum = nonAmtCols;
 
@@ -2608,20 +3023,133 @@ function LedgerTableView({
       }
     });
 
-    const purchAvgRate =
-      purchRateCount > 0 ? purchRateSum / purchRateCount : 0;
+    const purchAvgRate = purchRateCount > 0 ? purchRateSum / purchRateCount : 0;
 
     return { saleAvgRate, purchAvgRate };
   }, [isRateCut, debit, credit, displayCols]);
 
+  const { saleAvgTouch, purchAvgTouch, hasTouchMetric } = useMemo(() => {
+    const touchCol = displayCols.find((c) =>
+      /^touch$|^tch$|^touch\s*%$|^purity$|^purity\s*%$|^kdm$|^fineness$/i.test(
+        c.trim(),
+      ),
+    );
+    const netWtCol = displayCols.find((c) =>
+      /^net\s*wt|^net\s*weight|^weight$/i.test(c.trim()),
+    );
+    const pureWtCol = displayCols.find((c) =>
+      /^pure\s*wt|^pure\s*weight|^fine\s*wt|^fine\s*weight$/i.test(c.trim()),
+    );
 
-  const reportTitleStr = `${reportName} ${fileName} ${reportType}`.toLowerCase();
+    let salePureWtSum = 0;
+    let saleNetWtSum = 0;
+    let saleTouchSum = 0;
+    let saleTouchCount = 0;
+    let saleTouchWeightedSum = 0;
+
+    debit.forEach(({ row }) => {
+      const netW = netWtCol
+        ? parseAmt(row[netWtCol])
+        : parseAmt(row["Net Weight"] || row["Weight"]);
+      const pureW = pureWtCol
+        ? parseAmt(row[pureWtCol])
+        : parseAmt(row["Pure Weight"] || row["Fine Wt"] || row["Pure Wt"]);
+      const tVal = touchCol
+        ? parseAmt(row[touchCol])
+        : parseAmt(row["Touch"] || row["Purity"] || row["Tch"]);
+
+      if (pureW > 0) salePureWtSum += pureW;
+      if (netW > 0) saleNetWtSum += netW;
+
+      if (tVal > 0) {
+        saleTouchSum += tVal;
+        saleTouchCount++;
+        if (netW > 0) {
+          saleTouchWeightedSum += tVal * netW;
+        } else {
+          saleTouchWeightedSum += tVal;
+        }
+      }
+    });
+
+    let saleAvgTouch = 0;
+    if (salePureWtSum > 0 && saleNetWtSum > 0) {
+      saleAvgTouch = (salePureWtSum / saleNetWtSum) * 100;
+    } else if (saleNetWtSum > 0 && saleTouchWeightedSum > 0) {
+      saleAvgTouch = saleTouchWeightedSum / saleNetWtSum;
+    } else if (saleTouchCount > 0) {
+      saleAvgTouch = saleTouchSum / saleTouchCount;
+    }
+
+    let purchPureWtSum = 0;
+    let purchNetWtSum = 0;
+    let purchTouchSum = 0;
+    let purchTouchCount = 0;
+    let purchTouchWeightedSum = 0;
+
+    credit.forEach(({ row }) => {
+      const netW = netWtCol
+        ? parseAmt(row[netWtCol])
+        : parseAmt(
+            row["Net Weight (2)"] || row["Net Weight"] || row["Weight"],
+          );
+      const pureW = pureWtCol
+        ? parseAmt(row[pureWtCol])
+        : parseAmt(
+            row["Pure Weight (2)"] ||
+              row["Pure Weight"] ||
+              row["Fine Wt"] ||
+              row["Pure Wt"],
+          );
+      const tVal = touchCol
+        ? parseAmt(row[touchCol])
+        : parseAmt(
+            row["Touch (2)"] ||
+              row["Touch"] ||
+              row["Purity"] ||
+              row["Tch"],
+          );
+
+      if (pureW > 0) purchPureWtSum += pureW;
+      if (netW > 0) purchNetWtSum += netW;
+
+      if (tVal > 0) {
+        purchTouchSum += tVal;
+        purchTouchCount++;
+        if (netW > 0) {
+          purchTouchWeightedSum += tVal * netW;
+        } else {
+          purchTouchWeightedSum += tVal;
+        }
+      }
+    });
+
+    let purchAvgTouch = 0;
+    if (purchPureWtSum > 0 && purchNetWtSum > 0) {
+      purchAvgTouch = (purchPureWtSum / purchNetWtSum) * 100;
+    } else if (purchNetWtSum > 0 && purchTouchWeightedSum > 0) {
+      purchAvgTouch = purchTouchWeightedSum / purchNetWtSum;
+    } else if (purchTouchCount > 0) {
+      purchAvgTouch = purchTouchSum / purchTouchCount;
+    }
+
+    const hasTouchMetric =
+      Boolean(touchCol) ||
+      (salePureWtSum > 0 && saleNetWtSum > 0) ||
+      (purchPureWtSum > 0 && purchNetWtSum > 0) ||
+      saleAvgTouch > 0 ||
+      purchAvgTouch > 0;
+
+    return { saleAvgTouch, purchAvgTouch, hasTouchMetric };
+  }, [displayCols, debit, credit]);
+
+  const reportTitleStr =
+    `${reportName} ${fileName} ${reportType}`.toLowerCase();
   const isMetalJournal =
     !isRateCut &&
     (reportTitleStr.includes("metal journal") ||
       reportTitleStr.includes("metal_journal") ||
       reportTitleStr.includes("metal-journal"));
-
 
   const [hoveredPairId, setHoveredPairId] = useState<string | null>(null);
 
@@ -2659,7 +3187,7 @@ function LedgerTableView({
   }, [debit, credit, isMetalJournal]);
 
   const leftPaneTitle = useMemo(() => {
-    if (isRateCut) return "02 SALE RATE CUT (SELL)";
+    if (isRateCut) return isFinding ? "02 SALE / ISSUE (SELL)" : "02 SALE RATE CUT (SELL)";
     if (isMetalJournal) return "Material Customer Receive (Plus)";
 
     const bookNames = debit
@@ -2680,10 +3208,13 @@ function LedgerTableView({
     }
 
     return "Credit / Receive entry";
-  }, [isRateCut, isMetalJournal, debit]);
+  }, [isRateCut, isFinding, isMetalJournal, debit]);
 
   const rightPaneTitle = useMemo(() => {
-    if (isRateCut) return "01 PURCHASE RATE CUT (PURCHASE)";
+    if (isRateCut)
+      return isFinding
+        ? "01 FINDING PURCHASES (PURCHASE)"
+        : "01 PURCHASE RATE CUT (PURCHASE)";
     if (isMetalJournal) return "Material Customer Return (Minus)";
 
     const bookNames = credit
@@ -2704,8 +3235,7 @@ function LedgerTableView({
     }
 
     return "Debit / Issue entry";
-  }, [isRateCut, isMetalJournal, credit]);
-
+  }, [isRateCut, isFinding, isMetalJournal, credit]);
 
   const handleToggleApproval = (targetIndex: number) => {
     if (isMetalJournal) {
@@ -2740,25 +3270,27 @@ function LedgerTableView({
     toggleApproval(targetIndex);
   };
 
-
-
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[1040px]">
-        <div className="flex items-center justify-between border-b border-[#095f5a] bg-[#0e776f] px-5 py-3 text-white">
+        <div className="flex items-center justify-between border-b border-slate-300 bg-[#d1d1d1] px-5 py-3 text-slate-900">
           <div>
             <p className="text-xs font-bold">
-              {isRateCut
-                ? "Rate Cut Purchase & Sale Ledger"
-                : "Dynamic report ledger"}
+              {isFinding
+                ? "Finding Purchases & Sales Ledger"
+                : isRateCut
+                  ? "Rate Cut Purchase & Sale Ledger"
+                  : "Dynamic report ledger"}
             </p>
-            <p className="mt-0.5 text-[10px] text-white/65">
-              {isRateCut
-                ? "Sell entries on Left Pane & Purchase entries on Right Pane with dynamic total calculation"
-                : "All uploaded entries managed in one side-by-side ledger"}
+            <p className="mt-0.5 text-[10px] text-slate-600">
+              {isFinding
+                ? "Finding purchases, touch & rates dynamic calculation"
+                : isRateCut
+                  ? "Sell entries on Left Pane & Purchase entries on Right Pane with dynamic total calculation"
+                  : "All uploaded entries managed in one side-by-side ledger"}
             </p>
           </div>
-          <span className="text-[10px] font-semibold text-white/75">
+          <span className="text-[10px] font-semibold text-slate-600">
             {entries.length} source rows
           </span>
         </div>
@@ -2775,6 +3307,7 @@ function LedgerTableView({
             amountKey={amountKey}
             numericKeys={primaryNumericKeys}
             selected={selected}
+            approvedByMap={approvedByMap}
             toggleApproval={handleToggleApproval}
             getRelatedGroupIndices={getRelatedGroupIndices}
             entryColorPalette={entryColorPalette}
@@ -2795,6 +3328,7 @@ function LedgerTableView({
             amountKey={amountKey}
             numericKeys={primaryNumericKeys}
             selected={selected}
+            approvedByMap={approvedByMap}
             toggleApproval={handleToggleApproval}
             getRelatedGroupIndices={getRelatedGroupIndices}
             entryColorPalette={entryColorPalette}
@@ -2808,70 +3342,70 @@ function LedgerTableView({
         </div>
 
         {/* Dynamic Ledger Summary Footer — whole-report calculation */}
-        <div className="border-t-2 border-[#18476A] bg-[#f8fafc] text-xs font-sans shadow-xs">
+        <div className="border-t-2 border-slate-300 bg-white text-xs font-sans shadow-xs">
           {/* Row 1: Verify / Unverify / Sub Total */}
-          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
+          <div className="grid grid-cols-2 divide-x divide-slate-300 border-b border-slate-300">
             {/* Left Side: Receive (Plus) */}
-            <div className="grid grid-cols-4 items-center bg-[#edf6f4] px-3 py-2 text-slate-700">
+            <div className="grid grid-cols-4 items-center bg-white px-3 py-2 text-slate-900">
               <div className="text-center font-medium">
                 Verify :{" "}
-                <span className="font-bold text-[#126c65]">
+                <span className="font-bold text-slate-900">
                   {formatNum(debitVerified, isWeight)}
                 </span>
               </div>
               <div className="text-center font-medium">
                 Unverify :{" "}
-                <span className="font-bold text-[#18476A]">
+                <span className="font-bold text-slate-900">
                   {formatNum(debitUnverified, isWeight)}
                 </span>
               </div>
-              <div className="text-right font-bold text-[#0f524d] pr-2">
+              <div className="text-right font-bold text-slate-900 pr-2">
                 Sub Total
               </div>
-              <div className="text-right font-extrabold text-[#0c4440] font-mono text-[12.5px] pr-2">
+              <div className="text-right font-extrabold text-slate-900 font-mono text-[12.5px] pr-2">
                 {formatNum(debitSubTotal, isWeight)}
               </div>
             </div>
             {/* Right Side: Return (Minus) */}
-            <div className="grid grid-cols-4 items-center bg-[#f6ece6] px-3 py-2 text-slate-700">
+            <div className="grid grid-cols-4 items-center bg-white px-3 py-2 text-slate-900">
               <div className="text-center font-medium">
                 Verify :{" "}
-                <span className="font-bold text-[#8f5039]">
+                <span className="font-bold text-slate-900">
                   {formatNum(creditVerified, isWeight)}
                 </span>
               </div>
               <div className="text-center font-medium">
                 Unverify :{" "}
-                <span className="font-bold text-[#18476A]">
+                <span className="font-bold text-slate-900">
                   {formatNum(creditUnverified, isWeight)}
                 </span>
               </div>
-              <div className="text-right font-bold text-[#733f2b] pr-2">
+              <div className="text-right font-bold text-slate-900 pr-2">
                 Sub Total
               </div>
-              <div className="text-right font-extrabold text-[#5c3121] font-mono text-[12.5px] pr-2">
+              <div className="text-right font-extrabold text-slate-900 font-mono text-[12.5px] pr-2">
                 {formatNum(creditSubTotal, isWeight)}
               </div>
             </div>
           </div>
 
           {/* Row 2: Total Sale / Total Purchase */}
-          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
+          <div className="grid grid-cols-2 divide-x divide-slate-300 border-b border-slate-300">
             {/* Left Side: Total Sale */}
-            <div className="grid grid-cols-4 items-center bg-[#e1f1ed] px-3 py-2.5">
-              <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#0e5c56] pr-2">
+            <div className="grid grid-cols-4 items-center bg-white px-3 py-2.5">
+              <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-slate-900 pr-2">
                 {isRateCut ? "Total Sale" : "Total Receipt"}
               </div>
-              <div className="text-right font-black text-[#083c38] font-mono text-[13px] pr-2">
+              <div className="text-right font-black text-slate-900 font-mono text-[13px] pr-2">
                 {formatNum(totalReceipt, isWeight)}
               </div>
             </div>
             {/* Right Side: Total Purchase */}
-            <div className="grid grid-cols-4 items-center bg-[#f3e3d9] px-3 py-2.5">
-              <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#7e432d] pr-2">
+            <div className="grid grid-cols-4 items-center bg-white px-3 py-2.5">
+              <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-slate-900 pr-2">
                 {isRateCut ? "Total Purchase" : "Total Issue"}
               </div>
-              <div className="text-right font-black text-[#522919] font-mono text-[13px] pr-2">
+              <div className="text-right font-black text-slate-900 font-mono text-[13px] pr-2">
                 {formatNum(totalIssue, isWeight)}
               </div>
             </div>
@@ -2879,23 +3413,47 @@ function LedgerTableView({
 
           {/* Row 3: Average Sale Rate / Average Purchase Rate */}
           {isRateCut && (
-            <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] border-b border-[#c8b3a7]/60">
+            <div className="grid grid-cols-2 divide-x divide-slate-300 border-b border-slate-300">
               {/* Left Side: Average Sale Rate */}
-              <div className="grid grid-cols-4 items-center bg-[#e8f5f2] px-3 py-2 text-slate-700">
-                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#0e5c56] pr-2">
+              <div className="grid grid-cols-4 items-center bg-white px-3 py-2 text-slate-900">
+                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-slate-900 pr-2">
                   Average Sale Rate
                 </div>
-                <div className="text-right font-black text-[#083c38] font-mono text-[13px] pr-2">
+                <div className="text-right font-black text-slate-900 font-mono text-[13px] pr-2">
                   {formatNum(saleAvgRate, false)}
                 </div>
               </div>
               {/* Right Side: Average Purchase Rate */}
-              <div className="grid grid-cols-4 items-center bg-[#f8eee7] px-3 py-2 text-slate-700">
-                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-[#7e432d] pr-2">
+              <div className="grid grid-cols-4 items-center bg-white px-3 py-2 text-slate-900">
+                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-slate-900 pr-2">
                   Average Purchase Rate
                 </div>
-                <div className="text-right font-black text-[#522919] font-mono text-[13px] pr-2">
+                <div className="text-right font-black text-slate-900 font-mono text-[13px] pr-2">
                   {formatNum(purchAvgRate, false)}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Row 4: Average Sale Touch / Average Purchase Touch */}
+          {(isRateCut || hasTouchMetric || saleAvgTouch > 0 || purchAvgTouch > 0) && (
+            <div className="grid grid-cols-2 divide-x divide-slate-300 border-b border-slate-300">
+              {/* Left Side: Average Sale Touch */}
+              <div className="grid grid-cols-4 items-center bg-white px-3 py-2 text-slate-900">
+                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-slate-900 pr-2">
+                  Average Sale Touch
+                </div>
+                <div className="text-right font-black text-slate-900 font-mono text-[13px] pr-2">
+                  {saleAvgTouch > 0 ? `${saleAvgTouch.toFixed(2)}%` : "—"}
+                </div>
+              </div>
+              {/* Right Side: Average Purchase Touch */}
+              <div className="grid grid-cols-4 items-center bg-white px-3 py-2 text-slate-900">
+                <div className="col-span-3 text-right font-extrabold uppercase tracking-wider text-[11px] text-slate-900 pr-2">
+                  Average Purchase Touch
+                </div>
+                <div className="text-right font-black text-slate-900 font-mono text-[13px] pr-2">
+                  {purchAvgTouch > 0 ? `${purchAvgTouch.toFixed(2)}%` : "—"}
                 </div>
               </div>
             </div>
@@ -2903,25 +3461,25 @@ function LedgerTableView({
 
           {/* Additional Rate Cut metric breakdown rows (e.g. Net Weight) */}
           {isRateCut && rateCutMetrics.length > 0 && (
-            <div className="divide-y divide-slate-200 border-b border-[#c8b3a7]/60 bg-slate-100/70 text-[11.5px]">
+            <div className="divide-y divide-slate-200 border-b border-slate-300 bg-[#d1d1d1] text-[11.5px]">
               {rateCutMetrics.map((m) => (
                 <div
                   key={m.colKey}
-                  className="grid grid-cols-2 divide-x divide-[#c8b3a7]"
+                  className="grid grid-cols-2 divide-x divide-slate-300"
                 >
-                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#edf6f4]">
-                    <span className="font-semibold text-teal-800">
+                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#d1d1d1]">
+                    <span className="font-semibold text-slate-900">
                       Total Sale ({m.colKey}):
                     </span>
-                    <span className="font-extrabold font-mono text-teal-950">
+                    <span className="font-extrabold font-mono text-slate-900">
                       {formatNum(m.leftTotal, m.isWt)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#f6ece6]">
-                    <span className="font-semibold text-amber-800">
+                  <div className="flex items-center justify-between px-4 py-1.5 bg-[#d1d1d1]">
+                    <span className="font-semibold text-slate-900">
                       Total Purchase ({m.colKey}):
                     </span>
-                    <span className="font-extrabold font-mono text-amber-950">
+                    <span className="font-extrabold font-mono text-slate-900">
                       {formatNum(m.rightTotal, m.isWt)}
                     </span>
                   </div>
@@ -2931,19 +3489,19 @@ function LedgerTableView({
           )}
 
           {/* Row 3: Closing Balance / Rate Cut Net Balance */}
-          <div className="grid grid-cols-2 divide-x divide-[#c8b3a7] bg-[#18476A] text-white">
-            <div className="flex items-center justify-between px-4 py-2 bg-[#0f344f]">
-              <span className="text-[10.5px] font-semibold text-teal-200/90 uppercase tracking-widest">
+          <div className="grid grid-cols-2 divide-x divide-slate-300 bg-white text-slate-900">
+            <div className="flex items-center justify-between px-4 py-2 bg-white">
+              <span className="text-[10.5px] font-semibold text-slate-600 uppercase tracking-widest">
                 {isRateCut
                   ? "Rate Cut Summary Balance"
                   : "Ledger Balance Summary"}
               </span>
             </div>
-            <div className="grid grid-cols-4 items-center bg-[#18476A] px-3 py-2.5">
-              <div className="col-span-3 text-right font-black uppercase tracking-wider text-[11.5px] text-amber-300 pr-2">
+            <div className="grid grid-cols-4 items-center bg-white px-3 py-2.5">
+              <div className="col-span-3 text-right font-black uppercase tracking-wider text-[11.5px] text-slate-900 pr-2">
                 {isRateCut ? "Rate Cut Net Balance" : "Closing Balance"}
               </div>
-              <div className="text-right font-black font-mono text-[14px] text-white pr-2">
+              <div className="text-right font-black font-mono text-[14px] text-slate-900 pr-2">
                 {formatNum(closingBalance, isWeight)}
               </div>
             </div>
@@ -2988,6 +3546,9 @@ function SingleReportCard({
   const [activeHeaderStructure, setActiveHeaderStructure] =
     useState<HeaderStructure | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
+  const [approvedByMap, setApprovedByMap] = useState<Record<number, string>>(
+    {},
+  );
   const [viewMode, setViewMode] = useState<
     "auto" | "ledger" | "grid" | "analytics"
   >("auto");
@@ -2996,6 +3557,15 @@ function SingleReportCard({
     defaultHeaderLayout,
   );
   const [loadingData, setLoadingData] = useState(false);
+
+  const [fieldRules, setFieldRules] = useState<FieldFilterRule[]>([]);
+  const [matchMode, setMatchMode] = useState<MatchMode>("all");
+  const [reportSearch, setReportSearch] = useState<string>("");
+  const [quickColumnFilters, setQuickColumnFilters] = useState<
+    Record<string, string>
+  >({});
+  const [showQuickColumnFilters, setShowQuickColumnFilters] =
+    useState<boolean>(false);
 
   const reportId = report._id || report.reportId || "";
   const fileName = report.name || "Report";
@@ -3036,6 +3606,7 @@ function SingleReportCard({
       setRows(processedRows);
 
       const preSelected: number[] = [];
+      const preApprovedBy: Record<number, string> = {};
       if (
         (report as any).approvals &&
         Array.isArray((report as any).approvals)
@@ -3043,6 +3614,9 @@ function SingleReportCard({
         (report as any).approvals.forEach((app: any) => {
           if (typeof app.rowIndex === "number") {
             preSelected.push(app.rowIndex);
+            if (app.approvedBy) {
+              preApprovedBy[app.rowIndex] = String(app.approvedBy);
+            }
           }
         });
       }
@@ -3061,9 +3635,24 @@ function SingleReportCard({
           statusVal === "1"
         ) {
           if (!preSelected.includes(idx)) preSelected.push(idx);
+          if (!preApprovedBy[idx]) {
+            const explicitUser =
+              row["Checked By"] ||
+              row["CheckedBy"] ||
+              row["Approved By"] ||
+              row["ApprovedBy"] ||
+              row["User"] ||
+              row["Audited By"] ||
+              row["Audit User"] ||
+              (row as any)._approvedBy;
+            if (explicitUser) {
+              preApprovedBy[idx] = String(explicitUser);
+            }
+          }
         }
       });
       setSelected(preSelected);
+      setApprovedByMap(preApprovedBy);
     } else if (reportId) {
       setLoadingData(true);
       authFetch(`/api/reports/${reportId}`)
@@ -3113,6 +3702,7 @@ function SingleReportCard({
             }
 
             const preSelected: number[] = [];
+            const preApprovedBy: Record<number, string> = {};
             if (
               fetchedReport.approvals &&
               Array.isArray(fetchedReport.approvals)
@@ -3120,6 +3710,9 @@ function SingleReportCard({
               fetchedReport.approvals.forEach((app: any) => {
                 if (typeof app.rowIndex === "number") {
                   preSelected.push(app.rowIndex);
+                  if (app.approvedBy) {
+                    preApprovedBy[app.rowIndex] = String(app.approvedBy);
+                  }
                 }
               });
             }
@@ -3139,10 +3732,25 @@ function SingleReportCard({
                   statusVal === "1"
                 ) {
                   if (!preSelected.includes(idx)) preSelected.push(idx);
+                  if (!preApprovedBy[idx]) {
+                    const explicitUser =
+                      row["Checked By"] ||
+                      row["CheckedBy"] ||
+                      row["Approved By"] ||
+                      row["ApprovedBy"] ||
+                      row["User"] ||
+                      row["Audited By"] ||
+                      row["Audit User"] ||
+                      (row as any)._approvedBy;
+                    if (explicitUser) {
+                      preApprovedBy[idx] = String(explicitUser);
+                    }
+                  }
                 }
               },
             );
             setSelected(preSelected);
+            setApprovedByMap(preApprovedBy);
           } else {
             setRows([]);
           }
@@ -3228,8 +3836,59 @@ function SingleReportCard({
     );
   }, [fileName, report]);
 
+  const isFindingPurchases = useMemo(() => {
+    const nameStr = (fileName || "").toLowerCase();
+    const metaName = (report.name || "").toLowerCase();
+    const metaType = (report.type || "").toLowerCase();
+
+    const isFindingText = (s: string) => {
+      const clean = s.replace(/[^a-z0-9]/g, "");
+      return (
+        clean.includes("findingpurchase") ||
+        clean.includes("findingpurchases") ||
+        (clean.includes("finding") && clean.includes("purchase")) ||
+        clean === "finding" ||
+        s.toLowerCase().includes("finding purchase") ||
+        s.toLowerCase().includes("finding purchases") ||
+        s.toLowerCase().includes("finding")
+      );
+    };
+
+    if (
+      isFindingText(nameStr) ||
+      isFindingText(metaName) ||
+      isFindingText(metaType)
+    ) {
+      return true;
+    }
+
+    return rows.some((r) => {
+      const book = String(
+        r["Book Name"] ||
+          r["BookHeadName"] ||
+          r["Category"] ||
+          r["Type"] ||
+          r["P.Type"] ||
+          "",
+      ).toLowerCase();
+      return (
+        book.includes("finding purchase") ||
+        book.includes("finding purchases") ||
+        book.includes("finding") ||
+        Object.values(r).some((v) => /finding/i.test(String(v)))
+      );
+    });
+  }, [fileName, report, rows]);
+
   const gridDisplayColumns = useMemo(() => {
     if (!columns.length) return [];
+
+    if (isFindingPurchases) {
+      const baseCols = columns.filter(
+        (c) => !/purity/i.test(c) && !/^touch$|^tch$/i.test(c.trim()),
+      );
+      return [...baseCols, "Touch"];
+    }
 
     if (!isMelting) {
       return columns.filter((c) => !/purity/i.test(c));
@@ -3269,7 +3928,7 @@ function SingleReportCard({
       "Purity",
       ...nonPurityCols.slice(splitIndex),
     ];
-  }, [columns, isMelting, activeHeaderStructure]);
+  }, [columns, isFindingPurchases, isMelting, activeHeaderStructure]);
 
   const meltingColumns = useMemo(() => {
     return gridDisplayColumns;
@@ -3374,7 +4033,8 @@ function SingleReportCard({
     if (!rows.length) return false;
     if (isRateCutCard) return true;
 
-    const reportTitleStr = `${report.name || ""} ${fileName || ""} ${report.type || ""}`.toLowerCase();
+    const reportTitleStr =
+      `${report.name || ""} ${fileName || ""} ${report.type || ""}`.toLowerCase();
     if (
       reportTitleStr.includes("metal journal") ||
       reportTitleStr.includes("metal_journal") ||
@@ -3392,7 +4052,9 @@ function SingleReportCard({
     }
 
     const hasDebitCol = columns.some((c) => /^debit$|^dr\.?$/i.test(c.trim()));
-    const hasCreditCol = columns.some((c) => /^credit$|^cr\.?$/i.test(c.trim()));
+    const hasCreditCol = columns.some((c) =>
+      /^credit$|^cr\.?$/i.test(c.trim()),
+    );
     if (hasDebitCol && hasCreditCol) return true;
 
     const explicitEntryTypeColumn = columns.find((column) =>
@@ -3424,8 +4086,6 @@ function SingleReportCard({
     return false;
   }, [rows, columns, isRateCutCard, report, fileName]);
 
-
-
   const effectiveViewMode =
     viewMode === "auto"
       ? hasCreditDebitEntries
@@ -3448,21 +4108,27 @@ function SingleReportCard({
     [rows, columns],
   );
 
-  const filteredRows = useMemo(
-    () =>
-      rows.filter((row) => {
-        if (query && query.trim()) {
-          const q = query.toLowerCase();
-          const matchesQuery = Object.entries(row).some(([k, val]) => {
-            if (k === "_originalIndex") return false;
-            return String(val).toLowerCase().includes(q);
-          });
-          if (!matchesQuery) return false;
-        }
-        return true;
-      }),
-    [rows, query],
-  );
+  const filteredRows = useMemo(() => {
+    let result = filterRowsWithRules(
+      rows,
+      fieldRules,
+      matchMode,
+      quickColumnFilters,
+      reportSearch,
+    );
+
+    if (query && query.trim()) {
+      const q = query.toLowerCase();
+      result = result.filter((row) => {
+        return Object.entries(row).some(([k, val]) => {
+          if (k === "_originalIndex") return false;
+          return String(val ?? "").toLowerCase().includes(q);
+        });
+      });
+    }
+
+    return result;
+  }, [rows, fieldRules, matchMode, quickColumnFilters, reportSearch, query]);
 
   const visibleGridRows = useMemo(
     () =>
@@ -3508,6 +4174,14 @@ function SingleReportCard({
     return calculateOverallPurity(visibleGridRows, columns);
   }, [isMelting, visibleGridRows, columns]);
 
+  const grandTotalTouch = useMemo(() => {
+    if (!visibleGridRows.length) return "—";
+    return calculateOverallTouch(
+      visibleGridRows,
+      gridDisplayColumns.length ? gridDisplayColumns : columns,
+    );
+  }, [visibleGridRows, gridDisplayColumns, columns]);
+
   const getRelatedGroupIndices = (targetIndex: number): number[] => {
     const targetGroupId = rowGroupMeta.get(targetIndex)?.groupId;
 
@@ -3550,16 +4224,34 @@ function SingleReportCard({
     return [targetIndex];
   };
 
+  const getCurrentUserName = () => {
+    const user = getAuthUser();
+    return user?.name || user?.email?.split("@")[0] || "User";
+  };
+
   const toggleApproval = (index: number) => {
-    setSelected((current) => {
-      if (current.includes(index)) {
-        return current.filter((idx) => idx !== index);
+    const currentApprover = getCurrentUserName();
+    setSelected((prevSelected) => {
+      const isApproved = prevSelected.includes(index);
+      if (isApproved) {
+        setApprovedByMap((prevMap) => {
+          const next = { ...prevMap };
+          delete next[index];
+          return next;
+        });
+        return prevSelected.filter((idx) => idx !== index);
+      } else {
+        setApprovedByMap((prevMap) => ({
+          ...prevMap,
+          [index]: prevMap[index] || currentApprover,
+        }));
+        return [...prevSelected, index];
       }
-      return [...current, index];
     });
   };
 
   const toggleSelectAll = () => {
+    const currentApprover = getCurrentUserName();
     const filteredIndices = visibleGridRows.map((r, i) =>
       typeof r._originalIndex === "number" ? r._originalIndex : i,
     );
@@ -3571,14 +4263,30 @@ function SingleReportCard({
       setSelected((prev) =>
         prev.filter((idx) => !filteredIndices.includes(idx)),
       );
+      setApprovedByMap((prev) => {
+        const next = { ...prev };
+        filteredIndices.forEach((idx) => {
+          delete next[idx];
+        });
+        return next;
+      });
     } else {
       setSelected((prev) => Array.from(new Set([...prev, ...filteredIndices])));
+      setApprovedByMap((prev) => {
+        const next = { ...prev };
+        filteredIndices.forEach((idx) => {
+          if (!next[idx]) {
+            next[idx] = currentApprover;
+          }
+        });
+        return next;
+      });
     }
   };
 
   const saveApprovalsToBackend = async () => {
     const activeId = report._id || report.reportId || "";
-    const currentUser = getAuthUser();
+    const currentApprover = getCurrentUserName();
     let backendMsg =
       selected.length > 0
         ? `${selected.length} row(s) saved with approval audit trail`
@@ -3603,6 +4311,84 @@ function SingleReportCard({
       )?.[1];
     };
 
+    const isConsolidated = Boolean(
+      (report as any)._isConsolidated &&
+        (report as any)._sourceReportIds &&
+        (report as any)._sourceReportIds.length > 1,
+    );
+
+    if (isConsolidated) {
+      const sourceIds: string[] = (report as any)._sourceReportIds;
+      const reportsApprovalsMap = new Map<
+        string,
+        {
+          selectedIndexes: number[];
+          selectedEntries: {
+            rowIndex: number;
+            rowId?: string;
+            approvedBy: string;
+          }[];
+        }
+      >();
+
+      sourceIds.forEach((sId) => {
+        reportsApprovalsMap.set(sId, {
+          selectedIndexes: [],
+          selectedEntries: [],
+        });
+      });
+
+      selected.forEach((idx) => {
+        const row = rows.find((r) => (r as any)._originalIndex === idx) as
+          | Record<string, any>
+          | undefined;
+        if (!row) return;
+        const sId = (row as any)._sourceReportId || activeId;
+        const localIdx =
+          typeof (row as any)._sourceLocalIndex === "number"
+            ? (row as any)._sourceLocalIndex
+            : idx;
+        const bucket = reportsApprovalsMap.get(sId) || {
+          selectedIndexes: [],
+          selectedEntries: [],
+        };
+        bucket.selectedIndexes.push(localIdx);
+        bucket.selectedEntries.push({
+          rowIndex: localIdx,
+          rowId: row ? getRowId(row) : undefined,
+          approvedBy: approvedByMap[idx] || currentApprover,
+        });
+        reportsApprovalsMap.set(sId, bucket);
+      });
+
+      try {
+        await Promise.all(
+          Array.from(reportsApprovalsMap.entries()).map(([sId, payload]) =>
+            authFetch(`/api/reports/${sId}/approvals`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                selectedIndexes: payload.selectedIndexes,
+                selectedEntries: payload.selectedEntries,
+                approvedBy: currentApprover,
+              }),
+            }),
+          ),
+        );
+        backendMsg =
+          selected.length > 0
+            ? `${selected.length} row(s) saved with approval audit trail across ${sourceIds.length} reports`
+            : "All approvals cleared across reports.";
+        await refreshAllData();
+      } catch {
+        backendMsg =
+          "Failed to save approvals — check your connection and try again";
+      }
+
+      toast(backendMsg);
+      return;
+    }
+
     const selectedEntries = selected.map((idx) => {
       const row = rows.find((r) => (r as any)._originalIndex === idx) as
         | Record<string, string>
@@ -3610,6 +4396,7 @@ function SingleReportCard({
       return {
         rowIndex: idx,
         rowId: row ? getRowId(row) : undefined,
+        approvedBy: approvedByMap[idx] || currentApprover,
       };
     });
 
@@ -3620,7 +4407,7 @@ function SingleReportCard({
         body: JSON.stringify({
           selectedIndexes: selected,
           selectedEntries,
-          approvedBy: currentUser?.name || currentUser?.email || "Unknown",
+          approvedBy: currentApprover,
         }),
       });
       const data = await res.json();
@@ -3649,6 +4436,8 @@ function SingleReportCard({
       exportCols.forEach((col) => {
         if (/purity/i.test(col)) {
           copy[col] = r[col] || calculateRowPurity(r, columns, undefined, rows);
+        } else if (/^touch$|^tch$/i.test(col.trim())) {
+          copy[col] = r[col] || calculateRowTouch(r, columns);
         } else {
           copy[col] = r[col] ?? "";
         }
@@ -3660,7 +4449,10 @@ function SingleReportCard({
     XLSX.utils.book_append_sheet(workbook, worksheet, "Filtered Report Data");
 
     const cleanBase = (fileName || "report").toLowerCase().replace(/\s+/g, "-");
-    const outputFileName = `${cleanBase}-filtered.xlsx`;
+    const dateSuffix = (report as any)._dateRangeLabel
+      ? `-${String((report as any)._dateRangeLabel).replace(/[^a-z0-9]/gi, "-")}`
+      : "";
+    const outputFileName = `${cleanBase}${dateSuffix}-filtered.xlsx`;
     XLSX.writeFile(workbook, outputFileName);
     toast(`Exported ${filteredRows.length} rows to XLSX`);
 
@@ -3698,6 +4490,11 @@ function SingleReportCard({
       <div className="flex flex-col justify-between gap-4 border-b border-slate-100 p-4 sm:p-5 lg:flex-row lg:items-center bg-slate-50/60">
         <div className="flex items-center gap-3 flex-wrap">
           <h3 className="text-base font-bold text-slate-900">{fileName}</h3>
+          {(report as any)._isConsolidated && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-[#18476A]/10 border border-[#18476A]/20 px-2 py-0.5 text-[11px] font-bold text-[#18476A]">
+              Consolidated Date Range ({(report as any)._reportCount || 1} Uploads)
+            </span>
+          )}
           {report.owner && (
             <span className="text-xs text-slate-500 font-medium">
               By:{" "}
@@ -3706,14 +4503,19 @@ function SingleReportCard({
               </strong>
             </span>
           )}
-          {report.owner && formattedCreatedDate && (
-            <span className="text-slate-300">•</span>
+          {((report as any)._dateRangeLabel || formattedCreatedDate) && (
+            <>
+              <span className="text-slate-300">•</span>
+              <span className="text-xs text-slate-500 font-medium inline-flex items-center gap-1">
+                <Calendar size={12} className="text-slate-400" />
+                {(report as any)._dateRangeLabel || formattedCreatedDate}
+              </span>
+            </>
           )}
-          {formattedCreatedDate && (
-            <span className="text-xs text-slate-500 font-medium">
-              {formattedCreatedDate}
-            </span>
-          )}
+          <span className="text-slate-300">•</span>
+          <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+            {rows.length} Total Entries
+          </span>
         </div>
 
         {/* Action Controls for this report */}
@@ -3745,6 +4547,26 @@ function SingleReportCard({
           )}
         </div>
       </div>
+
+      {/* Dynamic Field-Wise Filter Manager for this Report */}
+      {rows.length > 0 && !loadingData && (
+        <ReportFieldFilterManager
+          fields={gridDisplayColumns.length ? gridDisplayColumns : columns}
+          rows={rows}
+          rules={fieldRules}
+          onRulesChange={setFieldRules}
+          matchMode={matchMode}
+          onMatchModeChange={setMatchMode}
+          reportSearch={reportSearch}
+          onReportSearchChange={setReportSearch}
+          showQuickColumnFilters={showQuickColumnFilters}
+          onToggleQuickColumnFilters={() =>
+            setShowQuickColumnFilters((prev) => !prev)
+          }
+          totalRowCount={rows.length}
+          filteredRowCount={filteredRows.length}
+        />
+      )}
 
       {/* Main Table / Ledger / Analytics Content */}
       {loadingData ? (
@@ -3793,6 +4615,7 @@ function SingleReportCard({
                 typeKey={typeKey!}
                 amountKey={amountKey!}
                 selected={selected}
+                approvedByMap={approvedByMap}
                 toggleApproval={toggleApproval}
                 getRelatedGroupIndices={getRelatedGroupIndices}
                 rowGroupMeta={rowGroupMeta}
@@ -3834,7 +4657,7 @@ function SingleReportCard({
                 ((activeHeaderStructure.levels &&
                   activeHeaderStructure.levels.length > 0) ||
                   activeHeaderStructure.mainHeaders.length > 0) ? (
-                  <thead className="sticky top-0 z-20 bg-[#18476A] font-sans text-xs border-b border-white/40 shadow-sm">
+                  <thead className="sticky top-0 z-20 bg-white font-sans text-xs border-b border-slate-300 shadow-sm">
                     {activeHeaderStructure.levels &&
                     activeHeaderStructure.levels.length > 0 ? (
                       <>
@@ -3847,14 +4670,14 @@ function SingleReportCard({
                           return (
                             <tr
                               key={lIdx}
-                              className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider border-b border-white/20"
+                              className="bg-white text-slate-900 font-bold text-xs uppercase tracking-wider border-b border-slate-300"
                             >
                               {lIdx === 0 && (
                                 <th
                                   rowSpan={
                                     activeHeaderStructure.levels!.length + 1
                                   }
-                                  className="sticky left-0 z-30 bg-[#18476A] px-4 py-2.5 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle text-center"
+                                  className="sticky left-0 z-30 bg-white px-4 py-2.5 border-r border-b border-slate-300 whitespace-nowrap min-w-[95px] align-middle text-center"
                                 >
                                   <div className="flex items-center justify-center gap-2 whitespace-nowrap">
                                     <button
@@ -3864,14 +4687,14 @@ function SingleReportCard({
                                         selected.length ===
                                           visibleGridRows.length &&
                                         visibleGridRows.length > 0
-                                          ? "border-emerald-400 bg-emerald-500 text-white"
-                                          : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                                          ? "border-[#0977f0] bg-[#0977f0] text-white"
+                                          : "border-slate-400 bg-white text-transparent hover:border-slate-600"
                                       }`}
                                       title="Toggle Select All"
                                     >
                                       <Check size={11} strokeWidth={3} />
                                     </button>
-                                    <span className="text-white font-bold text-xs whitespace-nowrap">
+                                    <span className="text-slate-900 font-bold text-xs whitespace-nowrap">
                                       APPROVE
                                     </span>
                                   </div>
@@ -3882,7 +4705,7 @@ function SingleReportCard({
                                   key={gIdx}
                                   colSpan={grp.colSpan}
                                   rowSpan={grp.rowSpan || 1}
-                                  className="px-3.5 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] uppercase tracking-wider text-xs whitespace-nowrap align-middle"
+                                  className="px-3.5 py-2 font-bold text-slate-900 text-center border-r border-b border-slate-300 bg-white uppercase tracking-wider text-xs whitespace-nowrap align-middle"
                                 >
                                   {grp.title}
                                 </th>
@@ -3891,7 +4714,7 @@ function SingleReportCard({
                           );
                         })}
 
-                        <tr className="bg-[#18476A] text-white font-bold text-xs">
+                        <tr className="bg-white text-slate-900 font-bold text-xs">
                           {gridDisplayColumns.map((colKey, idx) => {
                             const displayLabel = colKey.replace(
                               /\s*\(\d+\)$/,
@@ -3904,7 +4727,7 @@ function SingleReportCard({
                             return (
                               <th
                                 key={idx}
-                                className={`px-3.5 py-2.5 border-r border-b border-white/40 font-bold text-white whitespace-nowrap text-xs align-middle ${
+                                className={`px-3.5 py-2.5 border-r border-b border-slate-300 font-bold text-slate-900 whitespace-nowrap text-xs align-middle ${
                                   isNum ? "text-right" : "text-left"
                                 }`}
                               >
@@ -3913,55 +4736,145 @@ function SingleReportCard({
                             );
                           })}
                         </tr>
+
+                        {showQuickColumnFilters && (
+                          <tr className="bg-slate-100/95 border-b border-slate-300">
+                            <th className="sticky left-0 bg-slate-200/90 px-3 py-1 border-r border-b border-slate-300 text-center z-30">
+                              <Filter size={11} className="text-slate-500 mx-auto" />
+                            </th>
+                            {gridDisplayColumns.map((colKey) => (
+                              <th
+                                key={colKey}
+                                className="px-1.5 py-1 border-r border-b border-slate-300 bg-slate-100/90"
+                              >
+                                <div className="relative">
+                                  <input
+                                    type="text"
+                                    value={quickColumnFilters[colKey] || ""}
+                                    onChange={(e) =>
+                                      setQuickColumnFilters((prev) => ({
+                                        ...prev,
+                                        [colKey]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={`Filter...`}
+                                    className="h-6 w-full rounded border border-slate-300 bg-white px-1.5 pr-4 text-[11px] font-normal text-slate-800 placeholder-slate-400 outline-none focus:border-[#18476A] transition"
+                                  />
+                                  {quickColumnFilters[colKey] && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setQuickColumnFilters((prev) => {
+                                          const next = { ...prev };
+                                          delete next[colKey];
+                                          return next;
+                                        })
+                                      }
+                                      className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  )}
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        )}
                       </>
                     ) : (
-                      <tr className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider">
-                        <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle">
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={toggleSelectAll}
-                              className={`grid h-4 w-4 place-items-center rounded border transition ${
-                                selected.length === visibleGridRows.length &&
-                                visibleGridRows.length > 0
-                                  ? "border-emerald-400 bg-emerald-500 text-white"
-                                  : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
-                              }`}
-                              title="Toggle Select All"
-                            >
-                              <Check size={11} strokeWidth={3} />
-                            </button>
-                            <span className="text-white font-bold text-xs whitespace-nowrap">
-                              APPROVE
-                            </span>
-                          </div>
-                        </th>
-                        {(() => {
-                          const displayGroups = buildDisplayHeaderGroups(
-                            activeHeaderStructure.mainHeaders,
-                            gridDisplayColumns,
-                          );
-                          return (
-                            <>
-                              {displayGroups.map((grp, idx) => (
-                                <th
-                                  key={idx}
-                                  colSpan={grp.colSpan}
-                                  className="px-3.5 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] uppercase tracking-wider text-xs whitespace-nowrap align-middle"
-                                >
-                                  {grp.title}
-                                </th>
-                              ))}
-                            </>
-                          );
-                        })()}
-                      </tr>
+                      <>
+                        <tr className="bg-white text-slate-900 font-bold text-xs uppercase tracking-wider">
+                          <th className="sticky left-0 bg-white px-4 py-2 border-r border-b border-slate-300 whitespace-nowrap min-w-[95px] align-middle">
+                            <div className="flex items-center gap-2 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={toggleSelectAll}
+                                className={`grid h-4 w-4 place-items-center rounded border transition ${
+                                  selected.length === visibleGridRows.length &&
+                                  visibleGridRows.length > 0
+                                    ? "border-[#0977f0] bg-[#0977f0] text-white"
+                                    : "border-slate-400 bg-white text-transparent hover:border-slate-600"
+                                }`}
+                                title="Toggle Select All"
+                              >
+                                <Check size={11} strokeWidth={3} />
+                              </button>
+                              <span className="text-slate-900 font-bold text-xs whitespace-nowrap">
+                                APPROVE
+                              </span>
+                            </div>
+                          </th>
+                          {(() => {
+                            const displayGroups = buildDisplayHeaderGroups(
+                              activeHeaderStructure.mainHeaders,
+                              gridDisplayColumns,
+                            );
+                            return (
+                              <>
+                                {displayGroups.map((grp, idx) => (
+                                  <th
+                                    key={idx}
+                                    colSpan={grp.colSpan}
+                                    className="px-3.5 py-2 font-bold text-slate-900 text-center border-r border-b border-slate-300 bg-white uppercase tracking-wider text-xs whitespace-nowrap align-middle"
+                                  >
+                                    {grp.title}
+                                  </th>
+                                ))}
+                              </>
+                            );
+                          })()}
+                        </tr>
+
+                        {showQuickColumnFilters && (
+                          <tr className="bg-slate-100/95 border-b border-slate-300">
+                            <th className="sticky left-0 bg-slate-200/90 px-3 py-1 border-r border-b border-slate-300 text-center z-30">
+                              <Filter size={11} className="text-slate-500 mx-auto" />
+                            </th>
+                            {gridDisplayColumns.map((colKey) => (
+                              <th
+                                key={colKey}
+                                className="px-1.5 py-1 border-r border-b border-slate-300 bg-slate-100/90"
+                              >
+                                <div className="relative">
+                                  <input
+                                    type="text"
+                                    value={quickColumnFilters[colKey] || ""}
+                                    onChange={(e) =>
+                                      setQuickColumnFilters((prev) => ({
+                                        ...prev,
+                                        [colKey]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={`Filter...`}
+                                    className="h-6 w-full rounded border border-slate-300 bg-white px-1.5 pr-4 text-[11px] font-normal text-slate-800 placeholder-slate-400 outline-none focus:border-[#18476A] transition"
+                                  />
+                                  {quickColumnFilters[colKey] && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setQuickColumnFilters((prev) => {
+                                          const next = { ...prev };
+                                          delete next[colKey];
+                                          return next;
+                                        })
+                                      }
+                                      className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  )}
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        )}
+                      </>
                     )}
                   </thead>
                 ) : headerLayoutMode === "melting" ? (
-                  <thead className="sticky top-0 z-20 bg-[#18476A] font-sans text-xs border-b border-white/40 shadow-sm">
-                    <tr className="bg-[#18476A] text-white font-bold text-xs uppercase tracking-wider">
-                      <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 whitespace-nowrap min-w-[95px] align-middle">
+                  <thead className="sticky top-0 z-20 bg-white font-sans text-xs border-b border-slate-300 shadow-sm">
+                    <tr className="bg-white text-slate-900 font-bold text-xs uppercase tracking-wider">
+                      <th className="sticky left-0 bg-white px-4 py-2 border-r border-b border-slate-300 whitespace-nowrap min-w-[95px] align-middle">
                         <div className="flex items-center gap-2 whitespace-nowrap">
                           <button
                             type="button"
@@ -3969,14 +4882,14 @@ function SingleReportCard({
                             className={`grid h-4 w-4 place-items-center rounded border transition ${
                               selected.length === visibleGridRows.length &&
                               visibleGridRows.length > 0
-                                ? "border-emerald-400 bg-emerald-500 text-white"
-                                : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                                ? "border-[#0977f0] bg-[#0977f0] text-white"
+                                : "border-slate-400 bg-white text-transparent hover:border-slate-600"
                             }`}
                             title="Toggle Select All"
                           >
                             <Check size={11} strokeWidth={3} />
                           </button>
-                          <span className="text-white font-bold text-xs whitespace-nowrap">
+                          <span className="text-slate-900 font-bold text-xs whitespace-nowrap">
                             APPROVE
                           </span>
                         </div>
@@ -3984,34 +4897,34 @@ function SingleReportCard({
                       {baseColsCount > 0 && (
                         <th
                           colSpan={baseColsCount}
-                          className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"
+                          className="py-2 px-3 border-r border-b border-slate-300 bg-white"
                         ></th>
                       )}
                       <th
                         colSpan={inSpanCount}
-                        className="px-4 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] whitespace-nowrap align-middle"
+                        className="px-4 py-2 font-bold text-slate-900 text-center border-r border-b border-slate-300 bg-white whitespace-nowrap align-middle"
                       >
                         [B] IN
                       </th>
                       {purityColIndex !== -1 && (
-                        <th className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"></th>
+                        <th className="py-2 px-3 border-r border-b border-slate-300 bg-white"></th>
                       )}
                       <th
                         colSpan={outSpanCount}
-                        className="px-4 py-2 font-bold text-white text-center border-r border-b border-white/40 bg-[#18476A] whitespace-nowrap align-middle"
+                        className="px-4 py-2 font-bold text-slate-900 text-center border-r border-b border-slate-300 bg-white whitespace-nowrap align-middle"
                       >
                         [C] OUT
                       </th>
                       {trailingColsCount > 0 && (
                         <th
                           colSpan={trailingColsCount}
-                          className="py-2 px-3 border-r border-b border-white/40 bg-[#18476A]"
+                          className="py-2 px-3 border-r border-b border-slate-300 bg-white"
                         ></th>
                       )}
                     </tr>
 
-                    <tr className="bg-[#18476A] text-white font-bold text-xs">
-                      <th className="sticky left-0 bg-[#18476A] px-4 py-2 border-r border-b border-white/40 text-white text-left whitespace-nowrap align-middle">
+                    <tr className="bg-white text-slate-900 font-bold text-xs">
+                      <th className="sticky left-0 bg-white px-4 py-2 border-r border-b border-slate-300 text-slate-900 text-left whitespace-nowrap align-middle">
                         #
                       </th>
                       {meltingColumns.map((colName, idx) => {
@@ -4023,7 +4936,7 @@ function SingleReportCard({
                         return (
                           <th
                             key={idx}
-                            className={`px-3.5 py-2 border-r border-b border-white/40 font-bold text-white whitespace-nowrap text-xs align-middle ${
+                            className={`px-3.5 py-2 border-r border-b border-slate-300 font-bold text-slate-900 whitespace-nowrap text-xs align-middle ${
                               isNum ? "text-right" : "text-left"
                             }`}
                           >
@@ -4032,11 +4945,55 @@ function SingleReportCard({
                         );
                       })}
                     </tr>
+
+                    {showQuickColumnFilters && (
+                      <tr className="bg-slate-100/95 border-b border-slate-300">
+                        <th className="sticky left-0 bg-slate-200/90 px-3 py-1 border-r border-b border-slate-300 text-center z-30">
+                          <Filter size={11} className="text-slate-500 mx-auto" />
+                        </th>
+                        {meltingColumns.map((colKey) => (
+                          <th
+                            key={colKey}
+                            className="px-1.5 py-1 border-r border-b border-slate-300 bg-slate-100/90"
+                          >
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={quickColumnFilters[colKey] || ""}
+                                onChange={(e) =>
+                                  setQuickColumnFilters((prev) => ({
+                                    ...prev,
+                                    [colKey]: e.target.value,
+                                  }))
+                                }
+                                placeholder={`Filter...`}
+                                className="h-6 w-full rounded border border-slate-300 bg-white px-1.5 pr-4 text-[11px] font-normal text-slate-800 placeholder-slate-400 outline-none focus:border-[#18476A] transition"
+                              />
+                              {quickColumnFilters[colKey] && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setQuickColumnFilters((prev) => {
+                                      const next = { ...prev };
+                                      delete next[colKey];
+                                      return next;
+                                    })
+                                  }
+                                  className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                >
+                                  <X size={10} />
+                                </button>
+                              )}
+                            </div>
+                          </th>
+                        ))}
+                      </tr>
+                    )}
                   </thead>
                 ) : (
                   <thead className="sticky top-0 z-10">
-                    <tr className="bg-[#18476A] text-[10.5px] font-bold uppercase tracking-[0.08em] text-white">
-                      <th className="sticky left-0 bg-[#18476A] px-5 py-3.5 border-b border-r border-white/20 text-white whitespace-nowrap align-middle">
+                    <tr className="bg-white text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-900">
+                      <th className="sticky left-0 bg-white px-5 py-3.5 border-b border-r border-slate-300 text-slate-900 whitespace-nowrap align-middle">
                         <div className="flex items-center gap-2 whitespace-nowrap">
                           <button
                             type="button"
@@ -4044,29 +5001,79 @@ function SingleReportCard({
                             className={`grid h-4 w-4 place-items-center rounded border transition ${
                               selected.length === visibleGridRows.length &&
                               visibleGridRows.length > 0
-                                ? "border-emerald-400 bg-emerald-500 text-white"
-                                : "border-white/40 bg-white/10 text-transparent hover:border-white/70"
+                                ? "border-[#0977f0] bg-[#0977f0] text-white"
+                                : "border-slate-400 bg-white text-transparent hover:border-slate-600"
                             }`}
                           >
                             <Check size={11} strokeWidth={3} />
                           </button>
-                          <span className="text-white font-bold whitespace-nowrap">
+                          <span className="text-slate-900 font-bold whitespace-nowrap">
                             Approve
                           </span>
                         </div>
                       </th>
-                      {columns.map((column) => {
+                      {gridDisplayColumns.map((column) => {
                         const displayLabel = column.replace(/\s*\(\d+\)$/, "");
+                        const isNum =
+                          /pieces|weight|wt|fine|amt|amount|price|credit|debit|purity|touch/i.test(
+                            column,
+                          );
                         return (
                           <th
                             key={column}
-                            className="border-b border-r border-white/20 bg-[#18476A] px-5 py-3.5 font-bold text-white whitespace-nowrap align-middle"
+                            className={`border-b border-r border-slate-300 bg-white px-5 py-3.5 font-bold text-slate-900 whitespace-nowrap align-middle ${
+                              isNum ? "text-right" : "text-left"
+                            }`}
                           >
                             {displayLabel}
                           </th>
                         );
                       })}
                     </tr>
+
+                    {showQuickColumnFilters && (
+                      <tr className="bg-slate-100/95 border-b border-slate-300">
+                        <th className="sticky left-0 bg-slate-200/90 px-3 py-1 border-r border-b border-slate-300 text-center z-10">
+                          <Filter size={11} className="text-slate-500 mx-auto" />
+                        </th>
+                        {gridDisplayColumns.map((colKey) => (
+                          <th
+                            key={colKey}
+                            className="px-1.5 py-1 border-r border-b border-slate-300 bg-slate-100/90"
+                          >
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={quickColumnFilters[colKey] || ""}
+                                onChange={(e) =>
+                                  setQuickColumnFilters((prev) => ({
+                                    ...prev,
+                                    [colKey]: e.target.value,
+                                  }))
+                                }
+                                placeholder={`Filter...`}
+                                className="h-6 w-full rounded border border-slate-300 bg-white px-1.5 pr-4 text-[11px] font-normal text-slate-800 placeholder-slate-400 outline-none focus:border-[#18476A] transition"
+                              />
+                              {quickColumnFilters[colKey] && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setQuickColumnFilters((prev) => {
+                                      const next = { ...prev };
+                                      delete next[colKey];
+                                      return next;
+                                    })
+                                  }
+                                  className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                >
+                                  <X size={10} />
+                                </button>
+                              )}
+                            </div>
+                          </th>
+                        ))}
+                      </tr>
+                    )}
                   </thead>
                 )}
                 <tbody>
@@ -4098,7 +5105,17 @@ function SingleReportCard({
 
                     const user = getAuthUser();
                     const currentUserName =
-                      user?.name || user?.email?.split("@")[0] || "BHAVESH";
+                      user?.name || user?.email?.split("@")[0] || "User";
+                    const approverName =
+                      approvedByMap[origIndex] ||
+                      row["Checked By"] ||
+                      row["CheckedBy"] ||
+                      row["Approved By"] ||
+                      row["ApprovedBy"] ||
+                      row["User"] ||
+                      row["Audit User"] ||
+                      (row as any)._approvedBy ||
+                      currentUserName;
 
                     const isRowModified = Boolean(row._isModified);
                     const isNewRowEntry = Boolean(row._isNewEntry);
@@ -4106,22 +5123,22 @@ function SingleReportCard({
                     return (
                       <tr
                         key={origIndex}
-                        className={`transition-colors duration-150 ${
+                        className={`${
                           isRowApproved
-                            ? "bg-[#d3efe6] hover:bg-[#c4ebd3]"
+                            ? "bg-[#9f674e] text-[#241209]"
                             : isRowModified
-                              ? "bg-amber-50/90 hover:bg-amber-100/90 border-l-4 border-l-amber-500 shadow-2xs"
+                              ? "bg-amber-50/90 border-l-4 border-l-amber-500 shadow-2xs"
                               : isNewRowEntry
-                                ? "bg-emerald-50/80 hover:bg-emerald-100/80 border-l-4 border-l-emerald-500"
-                                : `${band.base} ${band.hover}`
+                                ? "bg-emerald-50/80 border-l-4 border-l-emerald-500"
+                                : band.base
                         } ${
                           isNewEntryStart && index > 0
-                            ? "border-t-2 border-slate-300/80 shadow-[0_-1px_0_rgba(0,0,0,0.04)]"
-                            : "border-b border-slate-100"
-                        }`}
+                            ? "border-t-2 border-slate-400"
+                            : ""
+                        } border-b border-slate-200`}
                       >
                         <td
-                          className={`sticky left-0 border-r border-b border-slate-100 bg-inherit px-4 py-2.5 whitespace-nowrap align-middle ${
+                          className={`sticky left-0 border-r border-b border-slate-300 bg-inherit px-4 pt-2.5 pb-4 whitespace-nowrap align-top ${
                             !isRowApproved && entryColorPalette !== "none"
                               ? band.border
                               : ""
@@ -4139,7 +5156,7 @@ function SingleReportCard({
                                 }
                                 className={`grid h-5 w-5 place-items-center rounded border transition ${
                                   isRowApproved
-                                    ? "border-emerald-500 bg-emerald-500 text-white shadow-sm"
+                                    ? "border-[#0977f0] bg-[#0977f0] text-white shadow-sm"
                                     : "border-slate-300 bg-white text-transparent hover:border-slate-400"
                                 }`}
                               >
@@ -4151,8 +5168,8 @@ function SingleReportCard({
                               </button>
                             </div>
                             {isRowApproved && (
-                              <span className="inline-flex items-center rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
-                                By - {currentUserName}
+                              <span className="text-[11.5px] text-inherit whitespace-nowrap leading-tight">
+                                By - {approverName}
                               </span>
                             )}
                             {isNewEntryStart && isRowModified && (
@@ -4179,6 +5196,8 @@ function SingleReportCard({
                         {gridDisplayColumns.map((column) => {
                           const isPurityCol =
                             isMelting && /purity/i.test(column);
+                          const isTouchCol =
+                            /^touch$|^tch$/i.test(column.trim());
                           const rawRowPurity = String(row[column] ?? "").trim();
                           const hasRowPurity =
                             rawRowPurity !== "" &&
@@ -4203,8 +5222,13 @@ function SingleReportCard({
                                   rows,
                                 )
                             : "";
+
+                          const touchValue = isTouchCol
+                            ? calculateRowTouch(row, columns)
+                            : "";
+
                           const isNum =
-                            /pieces|weight|wt|fine|amt|amount|price|credit|debit|purity/i.test(
+                            /pieces|weight|wt|fine|amt|amount|price|credit|debit|purity|touch/i.test(
                               column,
                             );
 
@@ -4224,6 +5248,8 @@ function SingleReportCard({
                             ) : (
                               "—"
                             )
+                          ) : isTouchCol ? (
+                            touchValue || "—"
                           ) : column === typeKey ? (
                             <span
                               className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${
@@ -4244,7 +5270,7 @@ function SingleReportCard({
                             return (
                               <td
                                 key={column}
-                                className={`border-b border-l border-slate-100 px-3 py-2 text-xs font-medium whitespace-nowrap align-middle bg-amber-100/40 ${
+                                className={`border-r border-b border-slate-200 px-3.5 py-2 text-xs font-medium whitespace-nowrap align-middle bg-amber-100/40 ${
                                   isNum ? "text-right font-mono" : "text-left"
                                 }`}
                               >
@@ -4289,12 +5315,16 @@ function SingleReportCard({
                           return (
                             <td
                               key={column}
-                              className={`border-b border-l border-slate-100 px-4 py-2.5 text-xs font-medium whitespace-nowrap align-middle ${
+                              className={`border-r border-b border-slate-200 px-4 pt-2.5 pb-4 text-xs font-medium whitespace-nowrap align-top ${
                                 isNum ? "text-right font-mono" : "text-left"
                               } ${
                                 isPurityCol
                                   ? "font-bold text-emerald-900"
-                                  : "text-slate-700"
+                                  : isTouchCol
+                                    ? "font-bold text-slate-900"
+                                    : isRowApproved
+                                      ? "text-[#241209]"
+                                      : "text-slate-700"
                               }`}
                             >
                               {baseValNode}
@@ -4308,34 +5338,37 @@ function SingleReportCard({
 
                 {Object.keys(grandTotals).length > 0 && (
                   <tfoot>
-                    <tr className="sticky bottom-0 border-t-2 border-[#123955] bg-[#18476A] text-white">
-                      <td className="sticky left-0 z-30 bg-[#18476A] px-4 py-3 text-xs font-bold whitespace-nowrap min-w-[140px] align-middle border-r border-white/20">
+                    <tr className="sticky bottom-0 border-t-2 border-slate-300 bg-[#d1d1d1] text-slate-900">
+                      <td className="sticky left-0 z-30 bg-[#d1d1d1] px-4 py-3 text-xs font-bold whitespace-nowrap min-w-[140px] align-middle border-r border-b border-slate-300">
                         Grand Total ({visibleGridRows.length} entries)
                       </td>
                       {gridDisplayColumns.map((column) => {
                         const isPurityCol = isMelting && /purity/i.test(column);
+                        const isTouchCol = /^touch$|^tch$/i.test(column.trim());
                         return (
                           <td
                             key={column}
-                            className="border-l border-white/10 px-4 py-3 text-right text-xs font-bold whitespace-nowrap align-middle font-mono"
+                            className="border-r border-b border-slate-300 px-4 py-3 text-right text-xs font-bold whitespace-nowrap align-middle font-mono"
                           >
                             {isPurityCol
                               ? grandTotalPurity
-                              : numericColumnsForTotals.includes(column)
-                                ? (grandTotals[column] ?? 0).toLocaleString(
-                                    "en-IN",
-                                    {
-                                      minimumFractionDigits: Number.isInteger(
-                                        grandTotals[column] ?? 0,
-                                      )
-                                        ? 0
-                                        : /wt|weight|fine/i.test(column)
-                                          ? 3
-                                          : 2,
-                                      maximumFractionDigits: 3,
-                                    },
-                                  )
-                                : ""}
+                              : isTouchCol
+                                ? grandTotalTouch
+                                : numericColumnsForTotals.includes(column)
+                                  ? (grandTotals[column] ?? 0).toLocaleString(
+                                      "en-IN",
+                                      {
+                                        minimumFractionDigits: Number.isInteger(
+                                          grandTotals[column] ?? 0,
+                                        )
+                                          ? 0
+                                          : /wt|weight|fine/i.test(column)
+                                            ? 3
+                                            : 2,
+                                        maximumFractionDigits: 3,
+                                      },
+                                    )
+                                  : ""}
                           </td>
                         );
                       })}
@@ -4611,18 +5644,34 @@ export function DynamicReportViewer({
     ]);
   };
 
+  /**
+   * Consolidates multiple report uploads of the same report type into a single unified report
+   * across the selected date range, combining all entries chronologically, mapping approvals,
+   * and maintaining full data integrity.
+   */
+  const consolidateReports = (
+    reports: ReportItem[],
+    sDate?: string,
+    eDate?: string,
+  ): ReportItem[] => {
+    return consolidateReportsByType(reports, sDate, eDate);
+  };
+
   const displayedReports = useMemo(() => {
-    if (!selectedType) return savedReports;
-    return savedReports.filter(
-      (r) =>
-        r.name === selectedType ||
-        r.type === selectedType ||
-        (r.name &&
-          r.name.trim().toLowerCase() === selectedType.trim().toLowerCase()) ||
-        (r.type &&
-          r.type.trim().toLowerCase() === selectedType.trim().toLowerCase()),
-    );
-  }, [savedReports, selectedType]);
+    let filtered = savedReports;
+    if (selectedType) {
+      filtered = savedReports.filter(
+        (r) =>
+          r.name === selectedType ||
+          r.type === selectedType ||
+          (r.name &&
+            r.name.trim().toLowerCase() === selectedType.trim().toLowerCase()) ||
+          (r.type &&
+            r.type.trim().toLowerCase() === selectedType.trim().toLowerCase()),
+      );
+    }
+    return consolidateReports(filtered, startDate, endDate);
+  }, [savedReports, selectedType, startDate, endDate]);
 
   const parseWorkbook = (buffer: ArrayBuffer) => {
     const workbook = XLSX.read(buffer, { type: "array" });
@@ -4666,6 +5715,16 @@ export function DynamicReportViewer({
     const processedRows = splitMergedEntries(filled, headers);
 
     const isMelting = cleanName.toLowerCase().includes("melting");
+    const isFindingPurchases =
+      cleanName.toLowerCase().includes("finding purchase") ||
+      cleanName.toLowerCase().includes("finding purchases") ||
+      cleanName.toLowerCase().includes("finding") ||
+      processedRows.some((r) => {
+        const b = String(
+          r["Book Name"] || r["BookHeadName"] || "",
+        ).toLowerCase();
+        return b.includes("finding purchase") || b.includes("finding");
+      });
 
     if (isMelting) {
       processedRows.forEach((row) => {
@@ -4675,6 +5734,12 @@ export function DynamicReportViewer({
           undefined,
           processedRows,
         );
+      });
+    } else if (isFindingPurchases) {
+      processedRows.forEach((row) => {
+        if (!row["Touch"]) {
+          row["Touch"] = calculateRowTouch(row, headers);
+        }
       });
     }
 
@@ -4699,14 +5764,28 @@ export function DynamicReportViewer({
           processedRows,
         );
       }
+      if (isFindingPurchases && !copy["Touch"]) {
+        copy["Touch"] = calculateRowTouch(r, headers);
+      }
       return copy;
     });
 
     const cleanRawHeaders = headers.filter((h) => !h.startsWith("_"));
-    const backendHeaders =
-      isMelting && !cleanRawHeaders.some((c) => /purity/i.test(c))
-        ? [...cleanRawHeaders.filter((c) => !/purity/i.test(c)), "Purity"]
-        : cleanRawHeaders;
+    let backendHeaders = cleanRawHeaders;
+    if (isMelting && !cleanRawHeaders.some((c) => /purity/i.test(c))) {
+      backendHeaders = [
+        ...cleanRawHeaders.filter((c) => !/purity/i.test(c)),
+        "Purity",
+      ];
+    } else if (
+      isFindingPurchases &&
+      !cleanRawHeaders.some((c) => /^touch$|^tch$/i.test(c.trim()))
+    ) {
+      backendHeaders = [
+        ...cleanRawHeaders.filter((c) => !/^touch$|^tch$/i.test(c.trim())),
+        "Touch",
+      ];
+    }
 
     let backendHeaderStructure = headerStructure;
     if (isMelting && headerStructure) {
@@ -4717,6 +5796,22 @@ export function DynamicReportViewer({
         : [
             ...headerStructure.subHeaders.filter((c) => !/purity/i.test(c)),
             "Purity",
+          ];
+
+      backendHeaderStructure = {
+        ...headerStructure,
+        subHeaders: updatedSubHeaders,
+      };
+    } else if (isFindingPurchases && headerStructure) {
+      const updatedSubHeaders = headerStructure.subHeaders.some((c) =>
+        /^touch$|^tch$/i.test(c.trim()),
+      )
+        ? headerStructure.subHeaders
+        : [
+            ...headerStructure.subHeaders.filter(
+              (c) => !/^touch$|^tch$/i.test(c.trim()),
+            ),
+            "Touch",
           ];
 
       backendHeaderStructure = {
@@ -4927,25 +6022,39 @@ export function DynamicReportViewer({
 
   const confirmDeleteReport = async () => {
     if (!reportToDelete) return;
-    const targetId = reportToDelete._id || reportToDelete.reportId;
-    if (!targetId) return;
+    const isConsolidated = Boolean((reportToDelete as any)._isConsolidated);
+    const targetIds: string[] =
+      (reportToDelete as any)._sourceReportIds &&
+      (reportToDelete as any)._sourceReportIds.length > 0
+        ? (reportToDelete as any)._sourceReportIds
+        : [reportToDelete._id || reportToDelete.reportId].filter(
+            Boolean,
+          ) as string[];
+
+    if (targetIds.length === 0) return;
 
     setDeletingReport(true);
     try {
-      const res = await authFetch(`/api/reports/${targetId}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (data.success) {
+      let successCount = 0;
+      for (const tId of targetIds) {
+        const res = await authFetch(`/api/reports/${tId}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+        if (data.success) successCount++;
+      }
+
+      if (successCount > 0) {
         toast(
-          data.message ||
-            `Report '${reportToDelete.name || "Report"}' deleted successfully.`,
+          isConsolidated
+            ? `All ${successCount} report uploads for '${reportToDelete.name || "Report"}' in this date range deleted successfully.`
+            : `Report '${reportToDelete.name || "Report"}' deleted successfully.`,
         );
         setReportToDelete(null);
         setSelectedType("");
         await refreshAllData(startDate, endDate, "");
       } else {
-        toast(data.error || "Failed to delete report.");
+        toast("Failed to delete report.");
       }
     } catch (err) {
       console.error("Delete report error:", err);
@@ -5005,7 +6114,11 @@ export function DynamicReportViewer({
         <div className="flex items-center gap-2">
           <FileSpreadsheet className="text-[#18476A]" size={20} />
           <h2 className="text-base font-bold text-slate-900">
-            Reports ({savedReports.length})
+            Reports ({displayedReports.length}
+            {savedReports.length > displayedReports.length
+              ? ` • ${savedReports.length} uploads`
+              : ""}
+            )
           </h2>
         </div>
 
@@ -5172,12 +6285,13 @@ export function DynamicReportViewer({
               </div>
             </div>
             <p className="text-xs text-slate-600 mb-5 leading-relaxed">
-              Are you sure you want to permanently delete the report{" "}
+              Are you sure you want to permanently delete{" "}
               <strong className="text-slate-900 font-semibold">
-                "{reportToDelete?.name || "this report"}"
+                {(reportToDelete as any)?._isConsolidated
+                  ? `all ${(reportToDelete as any)?._reportCount || ""} report uploads of "${reportToDelete?.name || "this report"}" in this date range`
+                  : `the report "${reportToDelete?.name || "this report"}"`}
               </strong>
-              ? This action will remove the entire report document from the
-              system.
+              ? This action will remove the report dataset from the system.
             </p>
             <div className="flex items-center justify-end gap-2.5">
               <button

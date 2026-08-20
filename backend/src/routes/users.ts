@@ -6,6 +6,18 @@ import { UserItem } from "@shared/api";
 import { authorizeRoles, AuthRequest } from "../middleware/auth";
 import { logActivity } from "../utils/auditLogger";
 
+function buildSpaceAndCaseInsensitiveRegex(str: string): RegExp {
+  const stripped = str.replace(/\s+/g, "");
+  const pattern =
+    "^\\s*" +
+    stripped
+      .split("")
+      .map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s*") +
+    "\\s*$";
+  return new RegExp(pattern, "i");
+}
+
 export const usersRouter = Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,13 +69,27 @@ usersRouter.post(
       }
 
       const cleanEmail = email.trim().toLowerCase();
+      const trimmedName = name.trim();
+
       const dbStatus = getDBStatus();
       if (dbStatus.stateCode !== 1) {
         return res.status(503).json({ success: false, error: "Database unavailable. Cannot create user." });
       }
 
-      const existing = await UserModel.findOne({ email: cleanEmail });
-      if (existing) {
+      // Check for duplicate Full Name (space & case insensitive)
+      const existingName = await UserModel.findOne({
+        name: { $regex: buildSpaceAndCaseInsensitiveRegex(trimmedName) },
+      });
+      if (existingName) {
+        return res.status(409).json({
+          success: false,
+          error: `A user with the name "${trimmedName}" already exists. Please choose a unique name.`,
+          field: "name",
+        });
+      }
+
+      const existingEmail = await UserModel.findOne({ email: cleanEmail });
+      if (existingEmail) {
         return res.status(409).json({
           success: false,
           error: "A user with this email already exists.",
@@ -73,7 +99,7 @@ usersRouter.post(
 
       const hashedPassword = await bcrypt.hash(password.trim(), 12);
       const created = await UserModel.create({
-        name: name.trim(),
+        name: trimmedName,
         email: cleanEmail,
         password: hashedPassword,
         role: role?.trim() || "Report Analyst",
@@ -94,13 +120,13 @@ usersRouter.post(
         module: "Users",
         section: `User ${created.name}`,
         action: "Add",
-        details: `Created new user account for ${created.email} with role "${created.role}".`,
+        details: `Created new user account for ${created.name} (${created.email}) with role "${created.role}".`,
       });
 
       res.status(201).json({
         success: true,
         data: userOut,
-        message: `User "${created.name}" created successfully. They can now log in with their credentials.`,
+        message: `User "${created.name}" created successfully. They can now log in with their full name and password.`,
       });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
@@ -130,20 +156,34 @@ usersRouter.put(
       }
 
       const cleanEmail = email.trim().toLowerCase();
+      const trimmedName = name.trim();
+
       const dbStatus = getDBStatus();
       if (dbStatus.stateCode !== 1) {
         return res.status(503).json({ success: false, error: "Database unavailable." });
       }
 
+      // Check duplicate name (excluding current user, space & case insensitive)
+      const duplicateName = await UserModel.findOne({
+        name: { $regex: buildSpaceAndCaseInsensitiveRegex(trimmedName) },
+        _id: { $ne: req.params.id },
+      });
+      if (duplicateName) {
+        return res.status(409).json({
+          success: false,
+          error: `Another user with the name "${trimmedName}" already exists.`,
+        });
+      }
+
       // Check duplicate email (excluding current user)
-      const duplicate = await UserModel.findOne({ email: cleanEmail, _id: { $ne: req.params.id } });
-      if (duplicate) {
+      const duplicateEmail = await UserModel.findOne({ email: cleanEmail, _id: { $ne: req.params.id } });
+      if (duplicateEmail) {
         return res.status(409).json({ success: false, error: "Another user with this email already exists." });
       }
 
       const updated = await UserModel.findByIdAndUpdate(
         req.params.id,
-        { name: name.trim(), email: cleanEmail, role: role?.trim() || "Report Analyst" },
+        { name: trimmedName, email: cleanEmail, role: role?.trim() || "Report Analyst" },
         { new: true }
       ).select("-password");
 

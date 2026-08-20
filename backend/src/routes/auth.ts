@@ -20,21 +20,35 @@ function getDefaultSuperAdmin() {
   };
 }
 
+function buildSpaceAndCaseInsensitiveRegex(str: string): RegExp {
+  const stripped = str.replace(/\s+/g, "");
+  const pattern =
+    "^\\s*" +
+    stripped
+      .split("")
+      .map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s*") +
+    "\\s*$";
+  return new RegExp(pattern, "i");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/auth/login
-// Validates email & password against MongoDB.
-// Returns specific errors: email not found, incorrect password, inactive account.
+// Validates username (Full Name) / email & password against MongoDB.
+// Spaces and case in the username are ignored for flexible matching.
 // ─────────────────────────────────────────────────────────────────────────────
 authRouter.post("/login", async (req, res) => {
   try {
-    const { email, password }: LoginRequest = req.body || {};
+    const { username, email, identifier, password }: LoginRequest = req.body || {};
+    const loginIdentifier = (username || identifier || email || "").trim();
+    const strippedIdentifier = loginIdentifier.replace(/\s+/g, "");
 
     // ── 1. Input validation ───────────────────────────────────────
-    if (!email || !email.trim()) {
+    if (!strippedIdentifier) {
       return res.status(400).json({
         success: false,
-        error: "Email is required to sign in.",
-        field: "email",
+        error: "Username is required to sign in.",
+        field: "username",
       });
     }
 
@@ -46,8 +60,6 @@ authRouter.post("/login", async (req, res) => {
       });
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-
     // ── 2. DB connection check ────────────────────────────────────
     const dbStatus = getDBStatus();
     if (dbStatus.stateCode !== 1) {
@@ -57,14 +69,22 @@ authRouter.post("/login", async (req, res) => {
       });
     }
 
-    // ── 3. Look up user by email ──────────────────────────────────
-    const dbUser = await UserModel.findOne({ email: cleanEmail }).select("+password");
+    // ── 3. Look up user by username (Full Name) OR email (ignoring spaces & case) ──
+    const spaceInsensitiveRegex = buildSpaceAndCaseInsensitiveRegex(strippedIdentifier);
+
+    const dbUser = await UserModel.findOne({
+      $or: [
+        { name: { $regex: spaceInsensitiveRegex } },
+        { email: { $regex: spaceInsensitiveRegex } },
+        { email: loginIdentifier.toLowerCase() },
+      ],
+    }).select("+password");
 
     if (!dbUser) {
       return res.status(404).json({
         success: false,
-        error: "Email not found. No account is registered with this email address.",
-        field: "email",
+        error: "Username not found. No account is registered with this username.",
+        field: "username",
       });
     }
 
@@ -98,13 +118,13 @@ authRouter.post("/login", async (req, res) => {
 
     if (!isValidPassword) {
       await logActivity(req, {
-        userName: dbUser.name || cleanEmail,
-        userEmail: cleanEmail,
+        userName: dbUser.name || loginIdentifier,
+        userEmail: dbUser.email || loginIdentifier,
         userRole: dbUser.role || "Unknown",
         module: "Auth",
         section: "Login Screen",
         action: "Login",
-        details: "Failed login attempt (incorrect password).",
+        details: `Failed login attempt for user "${dbUser.name}" (incorrect password).`,
       });
 
       return res.status(401).json({

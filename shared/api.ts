@@ -38,7 +38,9 @@ export interface UserSession {
 }
 
 export interface LoginRequest {
-  email: string;
+  username?: string;
+  email?: string;
+  identifier?: string;
   password?: string;
 }
 
@@ -49,8 +51,8 @@ export interface LoginResponse {
   user?: UserSession;
   message?: string;
   error?: string;
-  /** Which input field caused the error: "email" | "password" */
-  field?: "email" | "password";
+  /** Which input field caused the error: "username" | "email" | "password" */
+  field?: "username" | "email" | "password";
 }
 
 export interface MergedCellSpan {
@@ -121,7 +123,18 @@ export interface ReportItem {
   data?: Record<string, unknown>[];
   headers?: string[];
   headerStructure?: HeaderStructure;
+  approvals?: {
+    rowId?: string;
+    rowIndex?: number;
+    approvedBy: string;
+    approvedAt?: Date | string;
+  }[];
   createdAt?: string | Date;
+  updatedAt?: string | Date;
+  _isConsolidated?: boolean;
+  _sourceReportIds?: string[];
+  _reportCount?: number;
+  _dateRangeLabel?: string;
 }
 
 export interface UserItem {

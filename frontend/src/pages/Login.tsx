@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { CheckCircle2, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, LockKeyhole, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { LoginResponse } from "@shared/api";
 import { setAuthSession } from "@/lib/apiClient";
@@ -7,11 +7,11 @@ import { SGReportLogo } from "@/components/SGReportLogo";
 
 export default function Login() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");          // general / account errors
-  const [emailError, setEmailError] = useState(""); // email field–specific
+  const [usernameError, setUsernameError] = useState(""); // username field–specific
   const [passwordError, setPasswordError] = useState(""); // password field–specific
   const [successMsg, setSuccessMsg] = useState(""); // success banner
   const [loading, setLoading] = useState(false);
@@ -19,16 +19,16 @@ export default function Login() {
   /** Clear all error states */
   const clearErrors = () => {
     setError("");
-    setEmailError("");
+    setUsernameError("");
     setPasswordError("");
     setSuccessMsg("");
   };
 
-  const performLogin = async (loginEmail: string, loginPass: string) => {
+  const performLogin = async (loginUser: string, loginPass: string) => {
     clearErrors();
 
-    if (!loginEmail.trim()) {
-      setEmailError("Please enter your work email.");
+    if (!loginUser.trim()) {
+      setUsernameError("Please enter your username / full name.");
       return;
     }
     if (!loginPass.trim()) {
@@ -42,7 +42,7 @@ export default function Login() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail.trim(), password: loginPass.trim() }),
+        body: JSON.stringify({ username: loginUser.trim(), password: loginPass.trim() }),
       });
 
       const data: LoginResponse = await res.json();
@@ -56,8 +56,8 @@ export default function Login() {
       } else {
         // ── Route error to the correct field ─────────────────────
         const msg = data.error || "Authentication failed. Please check your credentials.";
-        if (data.field === "email") {
-          setEmailError(msg);
+        if (data.field === "username" || data.field === "email") {
+          setUsernameError(msg);
         } else if (data.field === "password") {
           setPasswordError(msg);
         } else {
@@ -73,7 +73,7 @@ export default function Login() {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    performLogin(email, password);
+    performLogin(username, password);
   };
 
   return (
@@ -116,28 +116,28 @@ export default function Login() {
           </div>
 
           <form onSubmit={submit} className="space-y-5">
-            {/* ── Email field ───────────────────────────────────── */}
+            {/* ── Username field ─────────────────────────────────── */}
             <div className="block">
-              <span className="text-xs font-bold text-slate-700">Email</span>
+              <span className="text-xs font-bold text-slate-700">Username</span>
               <div className="relative mt-2">
-                <Mail
+                <User
                   size={17}
-                  className={`absolute left-3.5 top-3.5 ${emailError ? "text-rose-400" : "text-slate-400"}`}
+                  className={`absolute left-3.5 top-3.5 ${usernameError ? "text-rose-400" : "text-slate-400"}`}
                 />
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => { setEmail(event.target.value); setEmailError(""); }}
+                  type="text"
+                  value={username}
+                  onChange={(event) => { setUsername(event.target.value); setUsernameError(""); }}
                   className={`h-12 w-full rounded-xl border bg-white pl-11 pr-4 text-sm outline-none transition placeholder:text-slate-300 focus:ring-4 ${
-                    emailError
+                    usernameError
                       ? "border-rose-400 focus:border-rose-400 focus:ring-rose-100"
                       : "border-slate-200 focus:border-[#6fa6c4] focus:ring-[#dbeaf2]"
                   }`}
-                  placeholder="you@company.com"
+                  placeholder="Enter your username or full name"
                 />
               </div>
-              {emailError && (
-                <p className="mt-1.5 text-xs font-medium text-rose-600">{emailError}</p>
+              {usernameError && (
+                <p className="mt-1.5 text-xs font-medium text-rose-600">{usernameError}</p>
               )}
             </div>
 
