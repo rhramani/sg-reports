@@ -6,6 +6,9 @@ import {
   consolidateReportsByType,
   classifyLedgerEntry,
   resolveLedgerPaneTitles,
+  fillSubEntriesFromMain,
+  isCreditSpecificColumn,
+  isDebitSpecificColumn,
 } from "../components/dashboard/DynamicReportViewer";
 
 function getExactDayRange(dateInput?: string | Date | null): { dayStart: Date; dayEnd: Date } {
@@ -1002,6 +1005,346 @@ describe("Journal Ledger Debit/Credit Classification and Pane Title Resolution",
     expect(leftTitle).toBe("DEBIT (DR)");
     expect(rightTitle).toBe("CREDIT (CR)");
   });
+
+  it("classifies and separates Metal Journal (Plus / Minus) columns and resolves clean titles", () => {
+    const metalCols = [
+      "Party",
+      "Book Name",
+      "Transaction No",
+      "Material Customer Receive (Plus)",
+      "Material Customer Return (Minus)",
+    ];
+
+    const metalRows = [
+      {
+        Party: "AASHI JEW",
+        "Book Name": "Metal Transfer Issue",
+        "Transaction No": "MTI/26-27/0077",
+        "Material Customer Receive (Plus)": "",
+        "Material Customer Return (Minus)": "50.000",
+      },
+      {
+        Party: "AMD JAIN CHAIN",
+        "Book Name": "Metal Transfer Receive",
+        "Transaction No": "MTR/26-27/0084",
+        "Material Customer Receive (Plus)": "100.000",
+        "Material Customer Return (Minus)": "",
+      },
+      {
+        Party: "ASTAMANGAL",
+        "Book Name": "Metal Transfer Receive",
+        "Transaction No": "MTR/26-27/0093",
+        "Material Customer Receive (Plus)": "0.391",
+        "Material Customer Return (Minus)": "",
+      },
+      {
+        Party: "KASAR",
+        "Book Name": "Metal Transfer Issue",
+        "Transaction No": "MTI/26-27/0088",
+        "Material Customer Receive (Plus)": "",
+        "Material Customer Return (Minus)": "0.391",
+      },
+    ];
+
+    const debitRows = metalRows.filter(
+      (r) => classifyLedgerEntry(r, metalCols) === "debit",
+    );
+    const creditRows = metalRows.filter(
+      (r) => classifyLedgerEntry(r, metalCols) === "credit",
+    );
+
+    expect(debitRows).toHaveLength(2);
+    expect(creditRows).toHaveLength(2);
+
+    expect(debitRows.map((r) => r.Party)).toEqual([
+      "AMD JAIN CHAIN",
+      "ASTAMANGAL",
+    ]);
+    expect(creditRows.map((r) => r.Party)).toEqual([
+      "AASHI JEW",
+      "KASAR",
+    ]);
+
+    const { leftTitle, rightTitle } = resolveLedgerPaneTitles({
+      isRateCut: false,
+      isFinding: false,
+      isMetalJournal: true,
+      debit: debitRows.map((row, index) => ({ row, index, group: "", groupId: index })),
+      credit: creditRows.map((row, index) => ({ row, index, group: "", groupId: index })),
+      columns: metalCols,
+    });
+
+    expect(leftTitle).toBe("Material Customer Receive (Plus)");
+    expect(rightTitle).toBe("Material Customer Return (Minus)");
+  });
+
+  it("dynamically pairs and aligns side-by-side matching entries in Metal Journal (Plus / Minus)", () => {
+    const debitEntries = [
+      {
+        row: {
+          Party: "AMD JAIN CHAIN",
+          "Book Name": "Metal Transfer Receive",
+          "Transaction No": "MTR/26-27/0084",
+          "Material Customer Receive (Plus)": "100.000",
+        },
+        index: 1,
+        group: "AMD JAIN CHAIN",
+        groupId: 1,
+      },
+      {
+        row: {
+          Party: "ASTAMANGAL",
+          "Book Name": "Metal Transfer Receive",
+          "Transaction No": "MTR/26-27/0093",
+          "Material Customer Receive (Plus)": "0.391",
+        },
+        index: 2,
+        group: "ASTAMANGAL",
+        groupId: 2,
+      },
+      {
+        row: {
+          Party: "KENVI GOLD",
+          "Book Name": "Metal Transfer Receive",
+          "Transaction No": "MTR/26-27/0091",
+          "Material Customer Receive (Plus)": "40.080",
+        },
+        index: 3,
+        group: "KENVI GOLD",
+        groupId: 3,
+      },
+    ];
+
+    const creditEntries = [
+      {
+        row: {
+          Party: "AASHI JEW",
+          "Book Name": "Metal Transfer Issue",
+          "Transaction No": "MTI/26-27/0077",
+          "Material Customer Return (Minus)": "50.000",
+        },
+        index: 0,
+        group: "AASHI JEW",
+        groupId: 0,
+      },
+      {
+        row: {
+          Party: "HARSHADBHAI CHAKI",
+          "Book Name": "Metal Transfer Issue",
+          "Transaction No": "MTI/26-27/0064",
+          "Material Customer Return (Minus)": "100.000",
+        },
+        index: 4,
+        group: "HARSHADBHAI CHAKI",
+        groupId: 4,
+      },
+      {
+        row: {
+          Party: "KASAR",
+          "Book Name": "Metal Transfer Issue",
+          "Transaction No": "MTI/26-27/0088",
+          "Material Customer Return (Minus)": "0.391",
+        },
+        index: 5,
+        group: "KASAR",
+        groupId: 5,
+      },
+    ];
+
+    const { alignedDebit, alignedCredit, matchedCount } = pairAndAlignLedgerEntries(
+      debitEntries,
+      creditEntries,
+    );
+
+    // 100.000 and 0.391 match!
+    expect(matchedCount).toBe(2);
+
+    // Row 0: AMD JAIN CHAIN (100.000) matched with HARSHADBHAI CHAKI (100.000)
+    expect(alignedDebit[0].row.Party).toBe("AMD JAIN CHAIN");
+    expect(alignedCredit[0].row.Party).toBe("HARSHADBHAI CHAKI");
+    expect(alignedDebit[0].matchedPairId).toBeDefined();
+    expect(alignedDebit[0].matchedPairId).toBe(alignedCredit[0].matchedPairId);
+    expect(alignedDebit[0].matchedWeight).toBe(100.0);
+
+    // Row 1: ASTAMANGAL (0.391) matched with KASAR (0.391)
+    expect(alignedDebit[1].row.Party).toBe("ASTAMANGAL");
+    expect(alignedCredit[1].row.Party).toBe("KASAR");
+    expect(alignedDebit[1].matchedPairId).toBeDefined();
+    expect(alignedDebit[1].matchedPairId).toBe(alignedCredit[1].matchedPairId);
+    expect(alignedDebit[1].matchedWeight).toBe(0.391);
+
+    // Row 2: KENVI GOLD (40.080) unmatched on credit side -> placeholder on credit
+    expect(alignedDebit[2].row.Party).toBe("KENVI GOLD");
+    expect(alignedCredit[2].isPlaceholder).toBe(true);
+
+    // Row 3: AASHI JEW (50.000) unmatched credit entry placed with debit placeholder
+    expect(alignedDebit[3].isPlaceholder).toBe(true);
+    expect(alignedCredit[3].row.Party).toBe("AASHI JEW");
+  });
+
+  it("does not forward-fill Material Customer Receive (Plus) or Material Customer Return (Minus) in fillSubEntriesFromMain", () => {
+    const columns = [
+      "Party",
+      "Book Name",
+      "Transaction No",
+      "Material Customer Receive (Plus)",
+      "Material Customer Return (Minus)",
+    ];
+
+    const rawRows = [
+      {
+        Party: "AASHI JEW",
+        "Book Name": "Metal Transfer Issue",
+        "Transaction No": "MTI/26-27/0077",
+        "Material Customer Receive (Plus)": "",
+        "Material Customer Return (Minus)": "50.000",
+      },
+      {
+        Party: "AMD JAIN CHAIN",
+        "Book Name": "Metal Transfer Receive",
+        "Transaction No": "MTR/26-27/0084",
+        "Material Customer Receive (Plus)": "100.000",
+        "Material Customer Return (Minus)": "",
+      },
+      {
+        Party: "AMD JAIN CHAIN",
+        "Book Name": "Metal Transfer Receive",
+        "Transaction No": "MTR/26-27/0100",
+        "Material Customer Receive (Plus)": "100.000",
+        "Material Customer Return (Minus)": "",
+      },
+    ];
+
+    const filled = fillSubEntriesFromMain(rawRows, columns);
+
+    expect(filled[0]["Material Customer Return (Minus)"]).toBe("50.000");
+    expect(filled[0]["Material Customer Receive (Plus)"]).toBe("");
+    expect(filled[1]["Material Customer Receive (Plus)"]).toBe("100.000");
+    expect(filled[1]["Material Customer Return (Minus)"]).toBe("");
+    expect(filled[2]["Material Customer Receive (Plus)"]).toBe("100.000");
+    expect(filled[2]["Material Customer Return (Minus)"]).toBe("");
+  });
+
+  it("pairs multiple 100.000 plus entries with multiple 100.000 minus entries face-to-face", () => {
+    const debitEntries = [
+      {
+        row: {
+          Party: "AMD JAIN CHAIN",
+          "Book Name": "Metal Transfer Receive",
+          "Transaction No": "MTR/26-27/0084",
+          "Material Customer Receive (Plus)": "100.000",
+        },
+        index: 1,
+        group: "AMD JAIN CHAIN",
+        groupId: 1,
+      },
+      {
+        row: {
+          Party: "AMD JAIN CHAIN",
+          "Book Name": "Metal Transfer Receive",
+          "Transaction No": "MTR/26-27/0100",
+          "Material Customer Receive (Plus)": "100.000",
+        },
+        index: 2,
+        group: "AMD JAIN CHAIN",
+        groupId: 2,
+      },
+      {
+        row: {
+          Party: "ANGUTHI JEWELLERS",
+          "Book Name": "Metal Transfer Receive",
+          "Transaction No": "MTR/26-27/0086",
+          "Material Customer Receive (Plus)": "100.000",
+        },
+        index: 3,
+        group: "ANGUTHI JEWELLERS",
+        groupId: 3,
+      },
+    ];
+
+    const creditEntries = [
+      {
+        row: {
+          Party: "HARSHADBHAI CHAKI",
+          "Book Name": "Metal Transfer Issue",
+          "Transaction No": "MTI/26-27/0084",
+          "Material Customer Return (Minus)": "100.000",
+        },
+        index: 4,
+        group: "HARSHADBHAI CHAKI",
+        groupId: 4,
+      },
+      {
+        row: {
+          Party: "LABHLAXMI CHAIN",
+          "Book Name": "Metal Transfer Issue",
+          "Transaction No": "MTI/26-27/0079",
+          "Material Customer Return (Minus)": "100.000",
+        },
+        index: 5,
+        group: "LABHLAXMI CHAIN",
+        groupId: 5,
+      },
+      {
+        row: {
+          Party: "LABHLAXMI CHAIN",
+          "Book Name": "Metal Transfer Issue",
+          "Transaction No": "MTI/26-27/0081",
+          "Material Customer Return (Minus)": "100.000",
+        },
+        index: 6,
+        group: "LABHLAXMI CHAIN",
+        groupId: 6,
+      },
+    ];
+
+    const { alignedDebit, alignedCredit, matchedCount } = pairAndAlignLedgerEntries(
+      debitEntries,
+      creditEntries,
+    );
+
+    expect(matchedCount).toBe(3);
+    expect(alignedDebit[0].matchedWeight).toBe(100.0);
+    expect(alignedCredit[0].row.Party).toBe("HARSHADBHAI CHAKI");
+    expect(alignedDebit[1].matchedWeight).toBe(100.0);
+    expect(alignedCredit[1].row.Party).toBe("LABHLAXMI CHAIN");
+    expect(alignedDebit[2].matchedWeight).toBe(100.0);
+    expect(alignedCredit[2].row.Party).toBe("LABHLAXMI CHAIN");
+  });
+
+  it("filters plus columns out of credit pane and minus columns out of debit pane", () => {
+    const allCols = [
+      "Party",
+      "Book Name",
+      "Transaction No",
+      "Material Customer Receive (Plus)",
+      "Material Customer Return (Minus)",
+    ];
+
+    expect(isDebitSpecificColumn("Material Customer Receive (Plus)")).toBe(true);
+    expect(isDebitSpecificColumn("Material Customer Return (Minus)")).toBe(false);
+    expect(isCreditSpecificColumn("Material Customer Return (Minus)")).toBe(true);
+    expect(isCreditSpecificColumn("Material Customer Receive (Plus)")).toBe(false);
+
+    const leftCols = allCols.filter((c) => !isCreditSpecificColumn(c));
+    const rightCols = allCols.filter((c) => !isDebitSpecificColumn(c));
+
+    expect(leftCols).toEqual([
+      "Party",
+      "Book Name",
+      "Transaction No",
+      "Material Customer Receive (Plus)",
+    ]);
+
+    expect(rightCols).toEqual([
+      "Party",
+      "Book Name",
+      "Transaction No",
+      "Material Customer Return (Minus)",
+    ]);
+  });
 });
+
+
 
 

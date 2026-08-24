@@ -431,7 +431,7 @@ function detectNumericColumns(rows: Record<string, any>[], columns: string[]) {
       /trans|voucher|vou|doc|ref|no|num|code|id|item|name|book|party|account|date|time|phone|mobile|sr|sl|serial|loss|brk|miss|type|status|narration|remarks/i.test(
         col,
       ) &&
-      !/wt|weight|fine|amt|amount|price|cost|balance|piece|pcs|qty|quantity/i.test(
+      !/wt|weight|fine|amt|amount|price|cost|balance|piece|pcs|qty|quantity|\(plus\)|\(minus\)|receive|return|issue/i.test(
         col,
       )
     ) {
@@ -439,7 +439,7 @@ function detectNumericColumns(rows: Record<string, any>[], columns: string[]) {
     }
 
     if (
-      /wt|weight|fine|amt|amount|price|credit|debit|cost|balance|piece|pcs|qty|quantity/i.test(
+      /wt|weight|fine|amt|amount|price|credit|debit|cost|balance|piece|pcs|qty|quantity|\(plus\)|\(minus\)|\(2\)|\(3\)|\(4\)|receive|return|issue/i.test(
         col,
       )
     ) {
@@ -453,7 +453,7 @@ function detectNumericColumns(rows: Record<string, any>[], columns: string[]) {
     const numericCount = sample.filter(
       (r) => parseNumeric(r[col]) !== null,
     ).length;
-    return numericCount > sample.length * 0.6;
+    return numericCount > sample.length * 0.4;
   });
 }
 
@@ -476,7 +476,7 @@ export function fillSubEntriesFromMain(
   );
 
   const isNumericCol = (col: string) =>
-    /wt|weight|fine|amt|amount|price|credit|debit|total|cost|balance|qty|quantity|piece|pcs/i.test(
+    /wt|weight|fine|amt|amount|price|credit|debit|total|cost|balance|qty|quantity|piece|pcs|\(plus\)|\(minus\)|\(2\)|\(3\)|\(4\)|receive|return|issue|loss|touch|tch|purity|rate/i.test(
       col,
     );
 
@@ -641,30 +641,64 @@ export function zeroAlloyOutPureWeight(
   });
 }
 
+export function sanitizeDirectionalReportRows(
+  rows: Record<string, any>[],
+  columns: string[],
+): Record<string, any>[] {
+  const plusCol = columns.find((c) =>
+    /\(plus\)|\breceive\b|\breceipt\b/i.test(c.trim()),
+  );
+  const minusCol = columns.find((c) =>
+    /\(minus\)|\breturn\b|\bissue\b/i.test(c.trim()),
+  );
+
+  if (!plusCol || !minusCol) return rows;
+
+  return rows.map((row) => {
+    if (isSubtotalRow(row, columns)) return row;
+
+    const book = String(
+      row["Book Name"] || row["BookHeadName"] || row["Transaction No"] || "",
+    ).toLowerCase();
+    const isReceive = /receive|receipt|\bmtr\b|\bplus\b/i.test(book);
+    const isIssue = /issue|return|\bmti\b|\bminus\b/i.test(book);
+
+    if (isReceive && !isIssue && row[minusCol]) {
+      return { ...row, [minusCol]: "" };
+    }
+    if (isIssue && !isReceive && row[plusCol]) {
+      return { ...row, [plusCol]: "" };
+    }
+    return row;
+  });
+}
+
 export function splitMergedEntries(
   rows: Record<string, any>[],
   columns: string[],
 ): Record<string, any>[] {
   if (!rows.length) return rows;
 
+  const sanitizedRows = sanitizeDirectionalReportRows(rows, columns);
+
   const side1Cols = columns.filter(
     (col) =>
-      /wt|weight|fine|amt|amount|price|debit|piece|pcs|qty|quantity/i.test(
+      /wt|weight|fine|amt|amount|price|debit|piece|pcs|qty|quantity|\(plus\)|receive|receipt/i.test(
         col,
-      ) && !/\(2\)|_2|\s2$|credit|out/i.test(col),
+      ) && !/\(2\)|_2|\s2$|credit|out|\(minus\)|return|issue/i.test(col),
   );
 
   const side2Cols = columns.filter((col) =>
-    /\(2\)|_2|\s2$|credit|out/i.test(col),
+    /\(2\)|_2|\s2$|credit|out|\(minus\)|return|issue/i.test(col),
   );
 
   if (!side1Cols.length || !side2Cols.length) {
-    return zeroAlloyOutPureWeight(rows, columns);
+    return zeroAlloyOutPureWeight(sanitizedRows, columns);
   }
 
   const result: Record<string, any>[] = [];
 
-  rows.forEach((row) => {
+  sanitizedRows.forEach((row) => {
     if (isSubtotalRow(row, columns)) {
       result.push(row);
       return;
@@ -702,7 +736,7 @@ export function splitMergedEntries(
 
   return sanitizedAlloyResult.map((r, i) => ({
     ...r,
-    _originalIndex: i,
+    _originalIndex: typeof r._originalIndex === "number" ? r._originalIndex : i,
   }));
 }
 
@@ -1591,6 +1625,26 @@ export function classifyLedgerEntry(
     if (crVal > 0 && drVal === 0) return "credit";
   }
 
+  // 2.1 Check Plus vs Minus or Receive vs Return numeric columns in displayCols
+  const plusCol = displayCols.find((c) =>
+    /\(plus\)|\breceive\b|\breceipt\b/i.test(c.trim()),
+  );
+  const minusCol = displayCols.find((c) =>
+    /\(minus\)|\breturn\b|\bissue\b/i.test(c.trim()),
+  );
+  if (plusCol && minusCol) {
+    const pVal = parseNum(row[plusCol]);
+    const mVal = parseNum(row[minusCol]);
+    if (pVal > 0 && mVal === 0) return "debit";
+    if (mVal > 0 && pVal === 0) return "credit";
+  } else if (plusCol && !minusCol) {
+    const pVal = parseNum(row[plusCol]);
+    if (pVal > 0) return "debit";
+  } else if (minusCol && !plusCol) {
+    const mVal = parseNum(row[minusCol]);
+    if (mVal > 0) return "credit";
+  }
+
   // 3. Dual-column reports (e.g. Metal Journal with "(2)" suffix columns)
   const hasDualCols = displayCols.some((c) => /\(2\)$/.test(c.trim()));
   if (hasDualCols) {
@@ -1649,6 +1703,30 @@ export function classifyLedgerEntry(
   return "debit";
 }
 
+export const isCreditSpecificColumn = (col: string) => {
+  const trimmed = col.trim();
+  if (
+    /\(minus\)|\breturn\b|\bissue\b|^credit$|^cr\.?$|\(2\)$/i.test(trimmed)
+  ) {
+    if (!/\(plus\)|\breceive\b|\bdebit\b/i.test(trimmed)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+export const isDebitSpecificColumn = (col: string) => {
+  const trimmed = col.trim();
+  if (
+    /\(plus\)|\breceive\b|\breceipt\b|^debit$|^dr\.?$/i.test(trimmed)
+  ) {
+    if (!/\(minus\)|\breturn\b|\bissue\b/i.test(trimmed)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export function resolveLedgerPaneTitles({
   isRateCut,
   isFinding,
@@ -1656,6 +1734,7 @@ export function resolveLedgerPaneTitles({
   debit,
   credit,
   typeCol,
+  columns = [],
 }: {
   isRateCut: boolean;
   isFinding: boolean;
@@ -1663,6 +1742,7 @@ export function resolveLedgerPaneTitles({
   debit: LedgerPaneRow[];
   credit: LedgerPaneRow[];
   typeCol?: string;
+  columns?: string[];
 }): { leftTitle: string; rightTitle: string } {
   if (isRateCut) {
     return {
@@ -1672,6 +1752,20 @@ export function resolveLedgerPaneTitles({
       rightTitle: isFinding
         ? "01 FINDING PURCHASES (PURCHASE)"
         : "01 PURCHASE RATE CUT (PURCHASE)",
+    };
+  }
+
+  // Look for explicit Plus and Minus column headers
+  const plusCol = columns.find((c) =>
+    /\(plus\)/i.test(c.trim()),
+  );
+  const minusCol = columns.find((c) =>
+    /\(minus\)/i.test(c.trim()),
+  );
+  if (plusCol && minusCol) {
+    return {
+      leftTitle: plusCol.trim(),
+      rightTitle: minusCol.trim(),
     };
   }
 
@@ -1774,10 +1868,15 @@ export function pairAndAlignLedgerEntries(
     return isNaN(num) ? 0 : num;
   };
 
-  const getWeightOrAmount = (rowObj: Record<string, any>) => {
+  const getWeightOrAmount = (
+    rowObj: Record<string, any>,
+    isDebitSide?: boolean,
+  ) => {
     let netWt = 0;
     let pureWt = 0;
     let amt = 0;
+    let primaryVal = 0;
+
     for (const k of Object.keys(rowObj || {})) {
       if (/_|isModified|_isNewEntry|_diff/.test(k)) continue;
       const v = parseAmt(rowObj[k]);
@@ -1785,17 +1884,63 @@ export function pairAndAlignLedgerEntries(
       if (/net\s*wt|net\s*weight/i.test(k) && netWt === 0) netWt = v;
       if (/pure\s*wt|pure\s*weight|fine/i.test(k) && pureWt === 0) pureWt = v;
       if (/^amt$|^amount$/i.test(k) && amt === 0) amt = v;
+      if (
+        (isDebitSide !== undefined
+          ? isDebitSide
+            ? /\(plus\)|receive|receipt|debit/i.test(k)
+            : /\(minus\)|return|issue|credit/i.test(k)
+          : /\(plus\)|\(minus\)|receive|return|issue/i.test(k)) &&
+        primaryVal === 0
+      )
+        primaryVal = v;
     }
     if (netWt === 0)
-      netWt = parseAmt(rowObj["Net Weight"] ?? rowObj["Net Weight (2)"]);
+      netWt = parseAmt(
+        isDebitSide === false
+          ? rowObj["Net Weight (2)"] ?? rowObj["Net Weight"]
+          : rowObj["Net Weight"] ?? rowObj["Net Weight (2)"],
+      );
     if (pureWt === 0)
-      pureWt = parseAmt(rowObj["Pure Weight"] ?? rowObj["Pure Weight (2)"]);
+      pureWt = parseAmt(
+        isDebitSide === false
+          ? rowObj["Pure Weight (2)"] ?? rowObj["Pure Weight"]
+          : rowObj["Pure Weight"] ?? rowObj["Pure Weight (2)"],
+      );
     if (amt === 0)
       amt = parseAmt(
-        rowObj["Amount"] ?? rowObj["Amount (2)"] ?? rowObj["Amt."],
+        isDebitSide === false
+          ? rowObj["Amount (2)"] ?? rowObj["Amount"] ?? rowObj["Amt."]
+          : rowObj["Amount"] ?? rowObj["Amount (2)"] ?? rowObj["Amt."],
       );
 
-    return { netWt, pureWt, amt };
+    if (primaryVal === 0 && netWt === 0 && pureWt === 0 && amt === 0) {
+      for (const [k, v] of Object.entries(rowObj || {})) {
+        if (
+          /_|isModified|_isNewEntry|_diff|date|time|year|month|day|sr|sl|code|id|ref|vou|doc|audit|user|party|book/i.test(
+            k,
+          )
+        )
+          continue;
+        const n = parseAmt(v);
+        if (n > 0) {
+          primaryVal = n;
+          break;
+        }
+      }
+    }
+
+    const effectiveVal =
+      primaryVal > 0
+        ? primaryVal
+        : netWt > 0
+          ? netWt
+          : pureWt > 0
+            ? pureWt
+            : amt > 0
+              ? amt
+              : primaryVal;
+
+    return { netWt, pureWt, amt, primaryVal: effectiveVal };
   };
 
   const usedCreditIndices = new Set<number>();
@@ -1817,13 +1962,8 @@ export function pairAndAlignLedgerEntries(
       return;
     }
 
-    const dVals = getWeightOrAmount(d.row);
-    const targetWt =
-      dVals.netWt > 0
-        ? dVals.netWt
-        : dVals.pureWt > 0
-          ? dVals.pureWt
-          : dVals.amt;
+    const dVals = getWeightOrAmount(d.row, true);
+    const targetWt = dVals.primaryVal;
 
     let matchedCreditIdx = -1;
     if (targetWt > 0) {
@@ -1832,8 +1972,10 @@ export function pairAndAlignLedgerEntries(
         const c = credit[cIdx];
         if (!c.row || c.isPlaceholder) continue;
 
-        const cVals = getWeightOrAmount(c.row);
+        const cVals = getWeightOrAmount(c.row, false);
 
+        const isPrimaryMatch =
+          Math.abs(targetWt - cVals.primaryVal) < 0.0005;
         const isNetMatch =
           dVals.netWt > 0 &&
           cVals.netWt > 0 &&
@@ -1848,6 +1990,7 @@ export function pairAndAlignLedgerEntries(
           Math.abs(dVals.amt - cVals.amt) < 0.005;
 
         if (
+          isPrimaryMatch ||
           (isNetMatch &&
             (dVals.pureWt === 0 || cVals.pureWt === 0 || isPureMatch)) ||
           (dVals.netWt === 0 && isPureMatch) ||
@@ -2611,6 +2754,8 @@ function LedgerPane({
                     </div>
                   </td>
                   {textColumns.map((column) => {
+                    const isPartyCol =
+                      /party|account|customer|vendor|client/i.test(column);
                     const rawVal =
                       row[column] !== undefined && row[column] !== ""
                         ? row[column]
@@ -2621,7 +2766,9 @@ function LedgerPane({
                     const valNode =
                       column === transactionKey
                         ? rawVal || group || "—"
-                        : rawVal || "—";
+                        : isPartyCol
+                          ? rawVal || group || "—"
+                          : rawVal || "—";
                     const fieldDiff = (
                       row._diff as
                         | Record<string, { old: unknown; new: unknown }>
@@ -2828,27 +2975,30 @@ function LedgerTableView({
 
   const numericKeys = displayCols.filter((col) => {
     if (
-      /date|time|year|month|day|sr|sl|code|id|ref|vou|doc|audit/i.test(
+      /date|time|year|month|day|sr|sl|code|id|ref|vou|doc|audit|status|check/i.test(
+        col.trim(),
+      ) &&
+      !/wt|weight|fine|amt|amount|price|cost|balance|piece|pcs|qty|quantity|\(plus\)|\(minus\)/i.test(
         col.trim(),
       )
     ) {
       return false;
     }
     if (
-      /wt|weight|fine|amt|amount|price|credit|debit|total|cost|balance/i.test(
+      /wt|weight|fine|amt|amount|price|credit|debit|total|cost|balance|piece|pcs|qty|quantity|\(plus\)|\(minus\)|\(2\)|\(3\)|\(4\)|receive|return|issue|loss|touch|tch|purity|rate/i.test(
         col,
       )
     )
       return true;
-    const sample = rows.slice(0, 10);
+    const sample = rows.slice(0, 30);
     if (!sample.length) return false;
     const numCount = sample.filter((r) => {
       const val = String(r[col] ?? "").trim();
-      if (!val) return false;
+      if (!val || val === "—" || val === "-") return false;
       if (/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(val)) return false;
       return !isNaN(Number(val));
     }).length;
-    return numCount > sample.length * 0.5;
+    return numCount > sample.length * 0.2;
   });
 
   const primaryNumericKeys =
@@ -2920,22 +3070,48 @@ function LedgerTableView({
     );
   }, [fileName, reportName, reportType, displayCols, rows]);
 
+  const partyCol = displayCols.find(
+    (c) =>
+      /party|account|customer|vendor|client|name/i.test(c.trim()) &&
+      !/wt|weight|fine|amt|amount|price|cost|balance|piece|pcs|qty|type|book/i.test(
+        c.trim(),
+      ),
+  );
+
+  let currentParty = "";
   let currentGroup = "";
   const allEntries = rows.map((row, loopIndex) => {
     const origIndex =
       typeof row._originalIndex === "number"
         ? (row._originalIndex as number)
         : loopIndex;
+    const isTotal =
+      rowGroupMeta?.get(origIndex)?.isTotalRow ??
+      isSubtotalRow(row, displayCols);
+
+    if (partyCol) {
+      const pVal = String(row[partyCol] ?? "").trim();
+      if (pVal && !/total/i.test(pVal)) {
+        currentParty = pVal;
+      }
+    }
+
     const value =
+      (partyCol && currentParty) ||
       row["Book Name"] ||
       row["BookHeadName"] ||
       row[transactionKey]?.trim() ||
       "";
     if (value && !/total/i.test(value)) currentGroup = value;
     const meta = rowGroupMeta?.get(origIndex);
-    const isTotal = meta?.isTotalRow ?? isSubtotalRow(row, displayCols);
+
+    const enrichedRow =
+      partyCol && currentParty && !row[partyCol]
+        ? { ...row, [partyCol]: currentParty }
+        : row;
+
     return {
-      row,
+      row: enrichedRow,
       index: origIndex,
       group: currentGroup,
       groupId: meta?.groupId ?? origIndex,
@@ -3053,6 +3229,65 @@ function LedgerTableView({
     );
   }
 
+  const hasDirectionalCols =
+    displayCols.some(isCreditSpecificColumn) ||
+    displayCols.some(isDebitSpecificColumn);
+
+  const leftColumns = useMemo(() => {
+    if (!hasDirectionalCols) return displayCols;
+    const filtered = displayCols.filter((col) => !isCreditSpecificColumn(col));
+    return filtered.length > 0 ? filtered : displayCols;
+  }, [displayCols, hasDirectionalCols]);
+
+  const rightColumns = useMemo(() => {
+    if (!hasDirectionalCols) return displayCols;
+    const filtered = displayCols.filter((col) => !isDebitSpecificColumn(col));
+    return filtered.length > 0 ? filtered : displayCols;
+  }, [displayCols, hasDirectionalCols]);
+
+  const leftNumericKeys = useMemo(() => {
+    const leftColsSet = new Set(leftColumns);
+    const matching = primaryNumericKeys.filter(
+      (col) => leftColsSet.has(col) && !isCreditSpecificColumn(col),
+    );
+    if (matching.length > 0) return matching;
+
+    const fallback = leftColumns.filter(
+      (col) =>
+        !isCreditSpecificColumn(col) &&
+        /wt|weight|fine|amt|amount|price|debit|receive|\(plus\)/i.test(col),
+    );
+    return fallback.length > 0
+      ? fallback
+      : primaryNumericKeys.filter((col) => !isCreditSpecificColumn(col));
+  }, [leftColumns, primaryNumericKeys]);
+
+  const rightNumericKeys = useMemo(() => {
+    const rightColsSet = new Set(rightColumns);
+    const matching = primaryNumericKeys.filter(
+      (col) => rightColsSet.has(col) && !isDebitSpecificColumn(col),
+    );
+    if (matching.length > 0) return matching;
+
+    const fallback = rightColumns.filter(
+      (col) =>
+        !isDebitSpecificColumn(col) &&
+        /wt|weight|fine|amt|amount|price|credit|issue|return|\(minus\)|\(2\)/i.test(
+          col,
+        ),
+    );
+    return fallback.length > 0
+      ? fallback
+      : primaryNumericKeys.filter((col) => !isDebitSpecificColumn(col));
+  }, [rightColumns, primaryNumericKeys]);
+
+  const primaryKey =
+    primaryNumericKeys[primaryNumericKeys.length - 1] || amountKey || "Amt.";
+  const isWeight = isRateCut
+    ? false
+    : /wt|weight|fine/i.test(primaryKey) ||
+      displayCols.some((c) => /net.*wt|pure.*wt/i.test(c));
+
   const getRowValue = (row: Record<string, any>, isDebitSide: boolean) => {
     if (isRateCut) {
       const amtVal = parseAmt(
@@ -3074,41 +3309,48 @@ function LedgerTableView({
     }
 
     if (isDebitSide) {
+      for (const nk of leftNumericKeys) {
+        const v = parseAmt(row[nk]);
+        if (v > 0) return v;
+      }
       return parseAmt(
-        row["Net Weight"] !== undefined && row["Net Weight"] !== ""
-          ? row["Net Weight"]
-          : row["Pure Weight"] !== undefined && row["Pure Weight"] !== ""
-            ? row["Pure Weight"]
-            : (debitCol && row[debitCol]) ||
-              row["Debit"] ||
-              row["Dr"] ||
-              row[primaryKey] ||
-              row["Amount"],
-      );
-    } else {
-      return parseAmt(
-        row["Net Weight (2)"] !== undefined && row["Net Weight (2)"] !== ""
-          ? row["Net Weight (2)"]
+        row["Material Customer Receive (Plus)"] !== undefined &&
+          row["Material Customer Receive (Plus)"] !== ""
+          ? row["Material Customer Receive (Plus)"]
           : row["Net Weight"] !== undefined && row["Net Weight"] !== ""
             ? row["Net Weight"]
-            : row["Pure Weight (2)"] !== undefined &&
-                row["Pure Weight (2)"] !== ""
-              ? row["Pure Weight (2)"]
-              : (creditCol && row[creditCol]) ||
-                row["Credit"] ||
-                row["Cr"] ||
+            : row["Pure Weight"] !== undefined && row["Pure Weight"] !== ""
+              ? row["Pure Weight"]
+              : (debitCol && row[debitCol]) ||
+                row["Debit"] ||
+                row["Dr"] ||
                 row[primaryKey] ||
                 row["Amount"],
       );
+    } else {
+      for (const nk of rightNumericKeys) {
+        const v = parseAmt(row[nk]);
+        if (v > 0) return v;
+      }
+      return parseAmt(
+        row["Material Customer Return (Minus)"] !== undefined &&
+          row["Material Customer Return (Minus)"] !== ""
+          ? row["Material Customer Return (Minus)"]
+          : row["Net Weight (2)"] !== undefined && row["Net Weight (2)"] !== ""
+            ? row["Net Weight (2)"]
+            : row["Net Weight"] !== undefined && row["Net Weight"] !== ""
+              ? row["Net Weight"]
+              : row["Pure Weight (2)"] !== undefined &&
+                  row["Pure Weight (2)"] !== ""
+                ? row["Pure Weight (2)"]
+                : (creditCol && row[creditCol]) ||
+                  row["Credit"] ||
+                  row["Cr"] ||
+                  row[primaryKey] ||
+                  row["Amount"],
+      );
     }
   };
-
-  const primaryKey =
-    primaryNumericKeys[primaryNumericKeys.length - 1] || amountKey || "Amt.";
-  const isWeight = isRateCut
-    ? false
-    : /wt|weight|fine/i.test(primaryKey) ||
-      displayCols.some((c) => /net.*wt|pure.*wt/i.test(c));
 
   let debitVerified = 0;
   let debitUnverified = 0;
@@ -3359,7 +3601,10 @@ function LedgerTableView({
     !isRateCut &&
     (reportTitleStr.includes("metal journal") ||
       reportTitleStr.includes("metal_journal") ||
-      reportTitleStr.includes("metal-journal"));
+      reportTitleStr.includes("metal-journal") ||
+      reportTitleStr.includes("metaljournal") ||
+      (displayCols.some((c) => /\(plus\)/i.test(c)) &&
+        displayCols.some((c) => /\(minus\)/i.test(c))));
 
   const [hoveredPairId, setHoveredPairId] = useState<string | null>(null);
 
@@ -3405,8 +3650,9 @@ function LedgerTableView({
         debit,
         credit,
         typeCol,
+        columns: displayCols,
       });
-    }, [isRateCut, isFinding, isMetalJournal, debit, credit, typeCol]);
+    }, [isRateCut, isFinding, isMetalJournal, debit, credit, typeCol, displayCols]);
 
   const handleToggleApproval = (targetIndex: number) => {
     if (isMetalJournal) {
@@ -3452,11 +3698,11 @@ function LedgerTableView({
             title={leftPaneTitle}
             tone="debit"
             rows={alignedDebit}
-            columns={displayCols}
+            columns={leftColumns}
             transactionKey={transactionKey}
             typeKey={typeKey}
             amountKey={amountKey}
-            numericKeys={primaryNumericKeys}
+            numericKeys={leftNumericKeys}
             selected={selected}
             approvedByMap={approvedByMap}
             toggleApproval={handleToggleApproval}
@@ -3476,11 +3722,11 @@ function LedgerTableView({
             title={rightPaneTitle}
             tone="credit"
             rows={alignedCredit}
-            columns={displayCols}
+            columns={rightColumns}
             transactionKey={transactionKey}
             typeKey={typeKey}
             amountKey={amountKey}
-            numericKeys={primaryNumericKeys}
+            numericKeys={rightNumericKeys}
             selected={selected}
             approvedByMap={approvedByMap}
             toggleApproval={handleToggleApproval}
