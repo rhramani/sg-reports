@@ -19,6 +19,9 @@ const Roles = lazy(() => import("./pages/Roles"));
 const Permissions = lazy(() => import("./pages/Permissions"));
 const AuditLogs = lazy(() => import("./pages/AuditLogs"));
 const Profile = lazy(() => import("./pages/Profile"));
+const JewelleryTransactions = lazy(() => import("./pages/JewelleryTransactions"));
+const Categories = lazy(() => import("./pages/Categories"));
+const JewelleryTransactionMaster = lazy(() => import("./pages/JewelleryTransactionMaster"));
 
 const queryClient = new QueryClient();
 
@@ -133,6 +136,62 @@ const App = () => (
             element={
               <ProtectedRoute>
                 <Profile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/jewellery-transactions"
+            element={
+              <ProtectedRoute>
+                <JewelleryTransactions />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/jewellery-transactions/reports"
+            element={
+              <ProtectedRoute>
+                <JewelleryTransactions />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/category"
+            element={
+              <ProtectedRoute>
+                <Categories />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/category"
+            element={
+              <ProtectedRoute>
+                <Categories />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/jewellery-transactions"
+            element={
+              <ProtectedRoute>
+                <JewelleryTransactionMaster />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/jewellery-transaction"
+            element={
+              <ProtectedRoute>
+                <JewelleryTransactionMaster />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/transactions"
+            element={
+              <ProtectedRoute>
+                <JewelleryTransactionMaster />
               </ProtectedRoute>
             }
           />

@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 let isConnecting = false;
 
 export async function connectDB(): Promise<typeof mongoose | undefined> {
-  const uri = process.env.MONGODB_URI || "mongodb://localhost:27017/sg-reports";
+  const uri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/sg-reports?directConnection=true";
 
   if (mongoose.connection.readyState === 1) {
     return mongoose;

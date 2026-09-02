@@ -10,6 +10,8 @@ const DEFAULT_MODULES = [
   "Dashboard",
   "Reports",
   "Approvals",
+  "Jewellery Transaction",
+  "Category",
   "Users",
   "Roles",
   "Permissions",
@@ -46,13 +48,18 @@ export function getDefaultModulePermissions(roleName: string): IModulePermission
     }
 
     if (isSupervisor) {
-      const isApprovalOrReport = mod === "Approvals" || mod === "Reports" || mod === "Dashboard";
+      const isAllowed =
+        mod === "Approvals" ||
+        mod === "Reports" ||
+        mod === "Dashboard" ||
+        mod === "Jewellery Transaction" ||
+        mod === "Category";
       return {
         module: mod,
         actions: {
           view: true,
-          add: isApprovalOrReport,
-          update: isApprovalOrReport,
+          add: isAllowed,
+          update: isAllowed,
           delete: false,
           export: true,
         },
@@ -60,13 +67,18 @@ export function getDefaultModulePermissions(roleName: string): IModulePermission
     }
 
     if (isAnalyst) {
-      const isReportOrApproval = mod === "Reports" || mod === "Dashboard" || mod === "Approvals";
+      const isAllowed =
+        mod === "Reports" ||
+        mod === "Dashboard" ||
+        mod === "Approvals" ||
+        mod === "Jewellery Transaction" ||
+        mod === "Category";
       return {
         module: mod,
         actions: {
           view: true,
-          add: isReportOrApproval,
-          update: isReportOrApproval,
+          add: isAllowed,
+          update: isAllowed,
           delete: false,
           export: true,
         },

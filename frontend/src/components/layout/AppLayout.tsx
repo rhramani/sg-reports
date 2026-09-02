@@ -5,7 +5,9 @@ import {
   ChevronDown,
   ClipboardCheck,
   Clock3,
+  Coins,
   FileBarChart,
+  FolderKanban,
   LayoutDashboard,
   Menu,
   Shield,
@@ -17,22 +19,52 @@ import { authFetch, getAuthUser, getAuthToken, setAuthSession, clearAuthSession 
 import { AppLayoutContext } from "@/lib/AppLayoutContext";
 import type { PermissionActions } from "@shared/api";
 
-// ── Navigation structure ────────────────────────────────────────────────────
-const navGroups = [
+// ── Navigation structure with Dropdown Groups ──────────────────────────────
+export interface NavItemConfig {
+  label: string;
+  moduleName?: string;
+  icon: any;
+  path: string;
+}
+
+export interface NavGroupConfig {
+  key: string;
+  label: string;
+  items: NavItemConfig[];
+}
+
+const navGroups: NavGroupConfig[] = [
   {
-    label: "Main menu",
+    key: "checking-report",
+    label: "Checking report",
     items: [
-      { label: "Dashboard", icon: LayoutDashboard },
-      { label: "Reports", icon: FileBarChart },
-      { label: "Approvals", icon: ClipboardCheck },
+      { label: "Dashboard", moduleName: "Dashboard", icon: LayoutDashboard, path: "/" },
+      { label: "Reports", moduleName: "Reports", icon: FileBarChart, path: "/reports" },
+      { label: "Approvals", moduleName: "Approvals", icon: ClipboardCheck, path: "/approvals" },
     ],
   },
   {
+    key: "jewellery-transaction",
+    label: "Jewellery Transaction",
+    items: [
+      { label: "Sales Report", moduleName: "Jewellery Transaction", icon: Coins, path: "/jewellery-transactions" },
+    ],
+  },
+  {
+    key: "master",
+    label: "Master",
+    items: [
+      { label: "Category Master", moduleName: "Category", icon: FolderKanban, path: "/category" },
+      { label: "Jewellery Transaction Excel Sheet", moduleName: "Jewellery Transaction Master", icon: Coins, path: "/master/jewellery-transactions" },
+    ],
+  },
+  {
+    key: "administration",
     label: "Administration",
     items: [
-      { label: "Users", icon: Users },
-      { label: "Roles", icon: Shield },
-      { label: "Permissions", icon: ShieldCheck },
+      { label: "Users", moduleName: "Users", icon: Users, path: "/users" },
+      { label: "Roles", moduleName: "Roles", icon: Shield, path: "/roles" },
+      { label: "Permissions", moduleName: "Permissions", icon: ShieldCheck, path: "/permissions" },
     ],
   },
 ];
@@ -41,6 +73,15 @@ const moduleToPathMap: Record<string, string> = {
   Dashboard: "/",
   Reports: "/reports",
   Approvals: "/approvals",
+  "Jewellery Transaction": "/jewellery-transactions",
+  "Jewellery Transaction Report": "/jewellery-transactions",
+  "Sales Report": "/jewellery-transactions",
+  Report: "/jewellery-transactions",
+  Category: "/category",
+  "Category Master": "/category",
+  Master: "/category",
+  "Jewellery Transaction Master": "/master/jewellery-transactions",
+  "Jewellery Transaction Excel Sheet": "/master/jewellery-transactions",
   Users: "/users",
   Roles: "/roles",
   Permissions: "/permissions",
@@ -54,6 +95,13 @@ const pathToModuleMap: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/reports": "Reports",
   "/approvals": "Approvals",
+  "/jewellery-transactions": "Jewellery Transaction",
+  "/jewellery-transactions/reports": "Jewellery Transaction",
+  "/category": "Category",
+  "/master/category": "Category",
+  "/master/jewellery-transactions": "Jewellery Transaction Master",
+  "/master/jewellery-transaction": "Jewellery Transaction Master",
+  "/master/transactions": "Jewellery Transaction Master",
   "/users": "Users",
   "/roles": "Roles",
   "/permissions": "Permissions",
@@ -190,7 +238,16 @@ export function AppLayout({ children }: AppLayoutProps) {
     }
 
     const isStandardWorkspaceModule =
-      moduleName === "Dashboard" || moduleName === "Reports" || moduleName === "Approvals";
+      moduleName === "Dashboard" ||
+      moduleName === "Reports" ||
+      moduleName === "Sales Report" ||
+      moduleName === "Approvals" ||
+      moduleName === "Jewellery Transaction" ||
+      moduleName === "Jewellery Transaction Master" ||
+      moduleName === "Jewellery Transaction Excel Sheet" ||
+      moduleName === "Jewellery Transaction Report" ||
+      moduleName === "Category" ||
+      moduleName === "Category Master";
 
     if (isStandardWorkspaceModule) {
       return { view: true, add: true, update: true, delete: false, export: true };
@@ -214,18 +271,38 @@ export function AppLayout({ children }: AppLayoutProps) {
     }
   }, [activeNav]);
 
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sg_sidebar_collapsed_groups");
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return {};
+  });
+
+  const toggleGroup = (groupLabel: string) => {
+    setCollapsedGroups((prev) => {
+      const next = { ...prev, [groupLabel]: !prev[groupLabel] };
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sg_sidebar_collapsed_groups", JSON.stringify(next));
+      }
+      return next;
+    });
+  };
+
   const visibleNavGroups = navGroups
     .map((group) => ({
       ...group,
       items: group.items.filter((item) => {
-        const perms = getPermissionsForModule(item.label);
+        const perms = getPermissionsForModule(item.moduleName || item.label);
         return perms.view;
       }),
     }))
     .filter((group) => group.items.length > 0);
 
   const allPermittedModules = [
-    ...visibleNavGroups.flatMap((g) => g.items.map((i) => i.label)),
+    ...visibleNavGroups.flatMap((g) => g.items.map((i) => i.moduleName || i.label)),
     ...(getPermissionsForModule("Activity Log").view ? ["Activity Log"] : []),
   ];
 
@@ -275,40 +352,82 @@ export function AppLayout({ children }: AppLayoutProps) {
             </div>
           </div>
 
-          <div className="px-4 pt-7">
-            {visibleNavGroups.map((group) => (
-              <div key={group.label} className="mb-7">
-                <p className="mb-2 px-3 text-[11px] font-extrabold uppercase tracking-[0.16em] text-white">
-                  {group.label}
-                </p>
-                <div className="space-y-1">
-                  {group.items.map(({ label, icon: Icon }) => (
-                    <button
-                      key={label}
-                      onClick={() => {
-                        navigateToModule(label);
-                        if (window.innerWidth < 1024) setSidebarOpen(false);
-                      }}
-                      className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[13px] transition ${
-                        activeNav === label
-                          ? "bg-[#123955] text-white font-bold shadow-[inset_3px_0_0_#ffffff]"
-                          : "text-white font-medium hover:bg-white/10"
+          <div className="px-4 pt-6 overflow-y-auto flex-1 space-y-4 custom-scrollbar">
+            {visibleNavGroups.map((group) => {
+              const isCollapsed = Boolean(collapsedGroups[group.label]);
+              const hasActiveChild = group.items.some((item) =>
+                item.path ? location.pathname === item.path : activeNav === (item.moduleName || item.label)
+              );
+
+              return (
+                <div key={group.label} className="border-b border-white/5 pb-2 last:border-0">
+                  {/* Collapsible Dropdown Header */}
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.label)}
+                    className={`group flex w-full items-center justify-between px-2.5 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.14em] rounded-lg transition cursor-pointer ${
+                      hasActiveChild
+                        ? "text-cyan-300 bg-white/5"
+                        : "text-white/90 hover:text-white hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>{group.label}</span>
+                    </span>
+                    <ChevronDown
+                      size={13}
+                      className={`text-white/70 transition-transform duration-200 ${
+                        isCollapsed ? "-rotate-90 text-white/50" : "rotate-0 text-white"
                       }`}
-                    >
-                      <span className="flex items-center gap-3">
-                        <Icon
-                          size={17}
-                          className={
-                            activeNav === label ? "text-white" : "text-white/70 group-hover:text-white"
-                          }
-                        />
-                        {label}
-                      </span>
-                    </button>
-                  ))}
+                    />
+                  </button>
+
+                  {/* Dropdown Items (open if !isCollapsed) */}
+                  <div
+                    className={`space-y-1 transition-all duration-200 overflow-hidden ${
+                      isCollapsed ? "max-h-0 opacity-0 pointer-events-none mt-0" : "max-h-96 opacity-100 mt-1"
+                    }`}
+                  >
+                    {group.items.map((item) => {
+                      const Icon = item.icon;
+                      const itemModule = item.moduleName || item.label;
+                      const isItemActive = item.path
+                        ? location.pathname === item.path
+                        : activeNav === itemModule;
+
+                      return (
+                        <button
+                          key={item.label}
+                          onClick={() => {
+                            if (item.path) {
+                              navigate(item.path);
+                            } else {
+                              navigateToModule(itemModule);
+                            }
+                            if (window.innerWidth < 1024) setSidebarOpen(false);
+                          }}
+                          className={`group flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[13px] transition cursor-pointer ${
+                            isItemActive
+                              ? "bg-[#123955] text-white font-bold shadow-[inset_3px_0_0_#38bdf8]"
+                              : "text-white/90 font-medium hover:bg-white/10 hover:text-white"
+                          }`}
+                        >
+                          <span className="flex items-center gap-3">
+                            <Icon
+                              size={16}
+                              className={
+                                isItemActive ? "text-cyan-300" : "text-white/70 group-hover:text-white"
+                              }
+                            />
+                            {item.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-auto p-4 border-t border-white/10">

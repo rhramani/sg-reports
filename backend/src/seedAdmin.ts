@@ -35,7 +35,7 @@ async function seedSuperAdmin() {
         status: "Active" as const,
         lastActive: "Active now",
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
 
     const { token, expiresAt } = generateToken({

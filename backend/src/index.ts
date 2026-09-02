@@ -17,6 +17,8 @@ import { rolesRouter } from "./routes/roles";
 import { reportTypesRouter } from "./routes/reportTypes";
 import { auditLogsRouter } from "./routes/auditLogs";
 import { profileRouter } from "./routes/profile";
+import { categoryRouter } from "./routes/category";
+import { jewelleryTransactionsRouter } from "./routes/jewelleryTransactions";
 import { authenticateToken } from "./middleware/auth";
 
 export function createServer() {
@@ -57,6 +59,8 @@ export function createServer() {
   app.use("/api/roles", authenticateToken, rolesRouter);
   app.use("/api/report-types", authenticateToken, reportTypesRouter);
   app.use("/api/audit-logs", authenticateToken, auditLogsRouter);
+  app.use("/api/categories", authenticateToken, categoryRouter);
+  app.use("/api/jewellery-transactions", authenticateToken, jewelleryTransactionsRouter);
 
   // Fallback 404 JSON handler for unhandled /api routes (prevents HTML fallback)
   app.use((_req, res) => {

@@ -18,6 +18,8 @@ import {
   Trash2,
   Download,
   ChevronRight,
+  Coins,
+  FolderKanban,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { authFetch } from "@/lib/apiClient";
@@ -38,9 +40,11 @@ interface RoleData {
 }
 
 const DEFAULT_MODULE_DEFINITIONS = [
-  { name: "Dashboard", icon: LayoutDashboard, category: "Workspace", description: "Main workspace metrics and status overview" },
-  { name: "Reports", icon: FileBarChart, category: "Workspace", description: "Report datasets, file uploads, and dynamic viewer" },
-  { name: "Approvals", icon: ClipboardCheck, category: "Workspace", description: "Workflow approvals and row status queue" },
+  { name: "Dashboard", icon: LayoutDashboard, category: "Checking report", description: "Main workspace metrics and status overview" },
+  { name: "Reports", icon: FileBarChart, category: "Checking report", description: "Report datasets, file uploads, and dynamic viewer" },
+  { name: "Approvals", icon: ClipboardCheck, category: "Checking report", description: "Workflow approvals and row status queue" },
+  { name: "Jewellery Transaction", icon: Coins, category: "Jewellery Transaction", description: "Jewellery transactions, excel uploads, days analysis, and dynamic report viewer" },
+  { name: "Category", icon: FolderKanban, category: "Master", description: "Jewellery product lines, metals, and category master records" },
   { name: "Users", icon: Users, category: "Administration", description: "Workspace members, roles, and invitations" },
   { name: "Roles", icon: Shield, category: "Administration", description: "Workspace role hierarchy and member assignments" },
   { name: "Permissions", icon: ShieldCheck, category: "Administration", description: "Granular action permissions per role & module" },
