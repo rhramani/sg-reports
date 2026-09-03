@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { JewelleryTransactionReportModel } from "../models/JewelleryTransaction";
+import { JewelleryTransactionReportModel, JewelleryTransactionItemModel } from "../models/JewelleryTransaction";
 import { CategoryModel } from "../models/Category";
 import { AuditLogModel } from "../models/AuditLog";
 
@@ -217,76 +217,100 @@ function isStrictDateString(val: unknown): boolean {
   return false;
 }
 
-// Detect representative date range for dashboard and header badges
-function detectReportDateRange(
-  headers: string[],
-  data: Record<string, any>[]
-): { dateKey: string | null; dateDisplay: string | null; minDate?: string; maxDate?: string } {
+function parseDateValue(val: unknown): Date | null {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) return val;
+  const s = String(val).trim();
+  if (!s || s === "-" || s === "N/A" || s === "null") return null;
+
+  const iso = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (iso) {
+    const y = parseInt(iso[1], 10);
+    const m = parseInt(iso[2], 10) - 1;
+    const d = parseInt(iso[3], 10);
+    const dt = new Date(y, m, d);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (dmy) {
+    const p1 = parseInt(dmy[1], 10);
+    const p2 = parseInt(dmy[2], 10);
+    const y = parseInt(dmy[3], 10);
+    let day = p1;
+    let month = p2 - 1;
+    if (p1 <= 12 && p2 > 12) {
+      day = p2;
+      month = p1 - 1;
+    }
+    const dt = new Date(y, month, day);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function detectReportDateRange(headers: string[], data: Record<string, any>[]): {
+  minDate: string | null;
+  maxDate: string | null;
+  dateKey: string | null;
+} {
   if (!headers.length || !data.length) {
-    return { dateKey: null, dateDisplay: null };
+    return { minDate: null, maxDate: null, dateKey: null };
   }
 
-  // Find candidate date column
-  let dateKey: string | null = null;
-  const priorityKeys = ["orderdate", "order_podate", "podate", "inwarddate", "styledate", "date", "entrydate"];
-
-  for (const pk of priorityKeys) {
-    const match = headers.find((h) => h.toLowerCase().replace(/[\s_-]+/g, "").includes(pk));
-    if (match) {
-      dateKey = match;
-      break;
-    }
-  }
-
-  if (!dateKey) {
-    const sampleRows = data.slice(0, 30);
-    for (const h of headers) {
-      let validCount = 0;
-      for (const row of sampleRows) {
-        if (row[h] && isStrictDateString(row[h])) {
-          validCount++;
-        }
-      }
-      if (validCount >= Math.min(3, sampleRows.length)) {
-        dateKey = h;
-        break;
+  const sample = data.slice(0, 50);
+  const detectedDateCols = headers.filter((h) => {
+    const isNamedDate = /date|time|entry|update|inward|order|trans|style/i.test(h);
+    let validCount = 0;
+    let totalChecked = 0;
+    for (const row of sample) {
+      const val = row[h];
+      if (val !== undefined && val !== null && String(val).trim() !== "") {
+        totalChecked++;
+        if (isStrictDateString(val)) validCount++;
       }
     }
-  }
-
-  if (!dateKey || data.length === 0) {
-    return { dateKey: null, dateDisplay: null };
-  }
-
-  const rawDates: string[] = [];
-  data.forEach((row) => {
-    const val = row[dateKey!];
-    if (val !== undefined && val !== null) {
-      const str = String(val).trim();
-      if (str && str !== "-" && str !== "N/A" && str !== "null" && isStrictDateString(str)) {
-        rawDates.push(str);
-      }
-    }
+    if (totalChecked === 0) return isNamedDate;
+    const ratio = validCount / totalChecked;
+    return ratio >= 0.5 || (isNamedDate && validCount > 0);
   });
 
-  if (rawDates.length === 0) {
-    return { dateKey, dateDisplay: null };
+  const bestDateKey =
+    detectedDateCols.find((c) => /order.*date|trans.*date|entry.*date|inward.*date/i.test(c)) ||
+    detectedDateCols[0] ||
+    null;
+
+  if (!bestDateKey) {
+    return { minDate: null, maxDate: null, dateKey: null };
   }
 
-  const uniqueDates = Array.from(new Set(rawDates));
-  if (uniqueDates.length === 1) {
-    return { dateKey, dateDisplay: uniqueDates[0], minDate: uniqueDates[0], maxDate: uniqueDates[0] };
-  }
+  let minTime = Infinity;
+  let maxTime = -Infinity;
+  let minDateStr: string | null = null;
+  let maxDateStr: string | null = null;
 
-  const sortedDates = [...uniqueDates].sort();
-  const minDate = sortedDates[0];
-  const maxDate = sortedDates[sortedDates.length - 1];
+  for (const row of data) {
+    const rawVal = row[bestDateKey];
+    const dt = parseDateValue(rawVal);
+    if (dt) {
+      const t = dt.getTime();
+      if (t < minTime) {
+        minTime = t;
+        minDateStr = dt.toISOString().split("T")[0];
+      }
+      if (t > maxTime) {
+        maxTime = t;
+        maxDateStr = dt.toISOString().split("T")[0];
+      }
+    }
+  }
 
   return {
-    dateKey,
-    dateDisplay: `${minDate} to ${maxDate}`,
-    minDate,
-    maxDate,
+    minDate: minDateStr,
+    maxDate: maxDateStr,
+    dateKey: bestDateKey,
   };
 }
 
@@ -305,15 +329,25 @@ jewelleryTransactionsRouter.get("/", async (req: Request, res: Response) => {
       });
     }
 
-    // Clean out any static Excel summary/total rows
-    const baseData = (report.data || []).filter((r) => !isTotalRow(r));
-
-    // If report in MongoDB contained dirty total rows, save the cleaned dataset back to MongoDB immediately
-    if (baseData.length !== (report.data || []).length) {
-      report.data = baseData;
-      report.rowCount = baseData.length;
+    // Migrate legacy embedded report.data array into JewelleryTransactionItemModel if present
+    if (Array.isArray(report.data) && report.data.length > 0) {
+      const legacyItems = report.data.filter((r) => !isTotalRow(r));
+      const itemsToInsert = legacyItems.map((row) => ({
+        reportId: report._id,
+        fingerprint: getRowFingerprint(row),
+        data: row,
+      }));
+      if (itemsToInsert.length > 0) {
+        await JewelleryTransactionItemModel.insertMany(itemsToInsert, { ordered: false }).catch(() => {});
+      }
+      report.data = undefined;
+      report.rowCount = await JewelleryTransactionItemModel.countDocuments({ reportId: report._id });
       await report.save();
     }
+
+    // Fetch items from separate collection (prevents 16MB document size limit)
+    const itemDocs = await JewelleryTransactionItemModel.find({ reportId: report._id }, { data: 1, _id: 0 }).lean();
+    const baseData = itemDocs.map((i) => i.data).filter((r) => !isTotalRow(r));
 
     const { search, category, page = "1", limit = "100" } = req.query;
     let filteredData = baseData;
@@ -415,75 +449,72 @@ jewelleryTransactionsRouter.post("/upload", async (req: Request, res: Response) 
     const uploadedBy = user?.name || user?.email || "Admin";
 
     // 1. Check existing report in MongoDB to perform deduplication
-    const existingReport = await JewelleryTransactionReportModel.findOne().sort({ createdAt: -1 });
+    let existingReport = await JewelleryTransactionReportModel.findOne().sort({ createdAt: -1 });
 
-    let finalRows: Record<string, any>[] = [];
-    let combinedHeaders: string[] = [...safeHeaders];
-    let newRowsInserted = 0;
-    let duplicateRowsSkipped = 0;
-
-    if (existingReport && Array.isArray(existingReport.data) && existingReport.data.length > 0) {
-      // Clean existing rows of any total rows
-      const existingCleaned = existingReport.data.filter((r) => !isTotalRow(r));
-
-      // Build set of existing row fingerprints
-      const existingFingerprints = new Set<string>();
-      existingCleaned.forEach((row) => {
-        const fp = getRowFingerprint(row);
-        if (fp) existingFingerprints.add(fp);
-      });
-
-      finalRows = [...existingCleaned];
-
-      // Merge headers
-      (existingReport.headers || []).forEach((h) => {
-        if (!combinedHeaders.includes(h)) combinedHeaders.push(h);
-      });
-
-      // Check each row in incoming data: insert if different/new, skip if identical
-      sanitizedIncoming.forEach((incomingRow) => {
-        const fp = getRowFingerprint(incomingRow);
-        if (existingFingerprints.has(fp)) {
-          duplicateRowsSkipped++;
-        } else {
-          existingFingerprints.add(fp);
-          finalRows.push(incomingRow);
-          newRowsInserted++;
-        }
-      });
-
-      // Update existing document in MongoDB
-      existingReport.reportName = reportName || fileName || existingReport.reportName;
-      existingReport.sourceFile = fileName || existingReport.sourceFile;
-      existingReport.headers = combinedHeaders;
-      existingReport.data = finalRows;
-      existingReport.rowCount = finalRows.length;
-      existingReport.uploadedBy = uploadedBy;
-      await existingReport.save();
-    } else {
-      // First upload: insert all valid rows
-      finalRows = sanitizedIncoming;
-      newRowsInserted = sanitizedIncoming.length;
-
-      await JewelleryTransactionReportModel.create({
+    if (!existingReport) {
+      existingReport = await JewelleryTransactionReportModel.create({
         reportName: reportName || fileName || "Jewellery Transactions",
         sourceFile: fileName || "uploaded_sheet.xlsx",
         headers: safeHeaders,
-        data: finalRows,
-        rowCount: finalRows.length,
+        rowCount: 0,
         uploadedBy,
       });
+    } else {
+      // Merge headers
+      const combinedHeaders = [...safeHeaders];
+      (existingReport.headers || []).forEach((h) => {
+        if (!combinedHeaders.includes(h)) combinedHeaders.push(h);
+      });
+      existingReport.headers = combinedHeaders;
+      existingReport.reportName = reportName || fileName || existingReport.reportName;
+      existingReport.sourceFile = fileName || existingReport.sourceFile;
+      existingReport.uploadedBy = uploadedBy;
+      existingReport.data = undefined;
+      await existingReport.save();
     }
 
+    // Fetch existing fingerprints for this report
+    const existingItems = await JewelleryTransactionItemModel.find({ reportId: existingReport._id }, { fingerprint: 1 }).lean();
+    const existingFingerprints = new Set<string>(existingItems.map((i) => i.fingerprint));
+
+    let newRowsInserted = 0;
+    let duplicateRowsSkipped = 0;
+    const itemsToInsert: { reportId: any; fingerprint: string; data: any }[] = [];
+
+    // Check each row in incoming data: insert if different/new, skip if identical
+    sanitizedIncoming.forEach((incomingRow) => {
+      const fp = getRowFingerprint(incomingRow);
+      if (existingFingerprints.has(fp)) {
+        duplicateRowsSkipped++;
+      } else {
+        existingFingerprints.add(fp);
+        itemsToInsert.push({
+          reportId: existingReport._id,
+          fingerprint: fp,
+          data: incomingRow,
+        });
+        newRowsInserted++;
+      }
+    });
+
+    if (itemsToInsert.length > 0) {
+      await JewelleryTransactionItemModel.insertMany(itemsToInsert, { ordered: false });
+    }
+
+    const totalCount = await JewelleryTransactionItemModel.countDocuments({ reportId: existingReport._id });
+    existingReport.rowCount = totalCount;
+    await existingReport.save();
+
     // 2. Extract unique (Category + BaseMetal) combinations and sync to Category Master
-    const catKey = findCategoryKey(combinedHeaders, finalRows[0]);
-    const metalKey = findBaseMetalKey(combinedHeaders, finalRows[0]);
+    const combinedHeaders = existingReport.headers;
+    const catKey = findCategoryKey(combinedHeaders, sanitizedIncoming[0]);
+    const metalKey = findBaseMetalKey(combinedHeaders, sanitizedIncoming[0]);
     let newCategoriesCreated = 0;
     const categoriesFound: string[] = [];
 
     if (catKey) {
       const pairsMap = new Map<string, { name: string; baseMetal: string }>();
-      finalRows.forEach((row) => {
+      sanitizedIncoming.forEach((row) => {
         const c = String(row[catKey] || "").trim();
         const m = metalKey ? String(row[metalKey] || "").trim() : "";
         if (c && c !== "-" && c !== "N/A" && c !== "null") {
@@ -526,7 +557,7 @@ jewelleryTransactionsRouter.post("/upload", async (req: Request, res: Response) 
     }
 
     // 3. Detect date range inside the report
-    const dateRangeInfo = detectReportDateRange(combinedHeaders, finalRows);
+    const dateRangeInfo = detectReportDateRange(combinedHeaders, sanitizedIncoming);
 
     // 4. Log into Audit Logs
     if (user) {
@@ -544,7 +575,7 @@ jewelleryTransactionsRouter.post("/upload", async (req: Request, res: Response) 
             module: "Jewellery Transaction",
             section: "Transaction Report Upload",
             action: "Add",
-            details: `Uploaded Excel "${fileName}": ${newRowsInserted} new entries inserted, ${duplicateRowsSkipped} duplicate rows skipped. Total in ledger: ${finalRows.length}.`,
+            details: `Uploaded Excel "${fileName}": ${newRowsInserted} new entries inserted, ${duplicateRowsSkipped} duplicate rows skipped. Total in ledger: ${totalCount}.`,
           },
         ],
       }).catch(() => {});
@@ -558,7 +589,7 @@ jewelleryTransactionsRouter.post("/upload", async (req: Request, res: Response) 
           : `All ${duplicateRowsSkipped} entries are already in the database (0 duplicates added). All categories are up to date.`,
       newRowsInserted,
       duplicateRowsSkipped,
-      totalRows: finalRows.length,
+      totalRows: totalCount,
       categoryKey: catKey,
       categoriesFound,
       newCategoriesCreated,
@@ -574,6 +605,7 @@ jewelleryTransactionsRouter.post("/upload", async (req: Request, res: Response) 
 jewelleryTransactionsRouter.delete("/", async (_req: Request, res: Response) => {
   try {
     await JewelleryTransactionReportModel.deleteMany({});
+    await JewelleryTransactionItemModel.deleteMany({});
     res.json({ success: true, message: "Jewellery transaction report data cleared successfully." });
   } catch (error: any) {
     console.error("DELETE /api/jewellery-transactions error:", error);

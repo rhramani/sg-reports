@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { CategoryModel } from "../models/Category";
-import { JewelleryTransactionReportModel } from "../models/JewelleryTransaction";
+import { JewelleryTransactionReportModel, JewelleryTransactionItemModel } from "../models/JewelleryTransaction";
 import { AuditLogModel } from "../models/AuditLog";
 
 export const categoryRouter = Router();
@@ -24,10 +24,16 @@ function findCategoryKey(headers: string[], sampleRow?: Record<string, any>): st
   ];
   for (const h of headers) {
     const norm = h.trim().toLowerCase().replace(/[\s_-]+/g, "");
-    if (possibleKeys.some((pk) => pk.replace(/[\s_-]+/g, "") === norm)) {
-      return h;
+    if (possibleKeys.some((pk) => pk.replace(/[\s_-]+/g, "") === norm)) return h;
+  }
+
+  if (sampleRow && typeof sampleRow === "object") {
+    for (const key of Object.keys(sampleRow)) {
+      const norm = key.trim().toLowerCase().replace(/[\s_-]+/g, "");
+      if (possibleKeys.some((pk) => pk.replace(/[\s_-]+/g, "") === norm)) return key;
     }
   }
+
   return null;
 }
 
@@ -44,6 +50,14 @@ function findBaseMetalKey(headers: string[], sampleRow?: Record<string, any>): s
     const norm = h.trim().toLowerCase().replace(/[\s_-]+/g, "");
     if (possible.some((p) => p.replace(/[\s_-]+/g, "") === norm)) return h;
   }
+
+  if (sampleRow && typeof sampleRow === "object") {
+    for (const key of Object.keys(sampleRow)) {
+      const norm = key.trim().toLowerCase().replace(/[\s_-]+/g, "");
+      if (possible.some((pk) => pk.replace(/[\s_-]+/g, "") === norm)) return key;
+    }
+  }
+
   return null;
 }
 
@@ -59,10 +73,12 @@ categoryRouter.get("/", async (_req: Request, res: Response) => {
     });
 
     const report = await JewelleryTransactionReportModel.findOne().sort({ createdAt: -1 });
-    if (report && Array.isArray(report.data)) {
-      const metalKey = findBaseMetalKey(report.headers, report.data[0]);
+    if (report) {
+      const itemDocs = await JewelleryTransactionItemModel.find({ reportId: report._id }, { data: 1, _id: 0 }).lean();
+      const reportRows = itemDocs.map((i) => i.data);
+      const metalKey = findBaseMetalKey(report.headers, reportRows[0]);
       if (metalKey) {
-        report.data.forEach((r) => {
+        reportRows.forEach((r) => {
           const val = r[metalKey];
           if (val !== undefined && val !== null) {
             const s = String(val).trim();
@@ -90,19 +106,25 @@ categoryRouter.get("/", async (_req: Request, res: Response) => {
 categoryRouter.post("/sync-from-transactions", async (_req: Request, res: Response) => {
   try {
     const report = await JewelleryTransactionReportModel.findOne().sort({ createdAt: -1 });
-    if (!report || !Array.isArray(report.data) || report.data.length === 0) {
+    if (!report) {
       return res.status(400).json({ success: false, error: "No transaction dataset available to sync from." });
     }
 
-    const catKey = findCategoryKey(report.headers, report.data[0]);
-    const metalKey = findBaseMetalKey(report.headers, report.data[0]);
+    const itemDocs = await JewelleryTransactionItemModel.find({ reportId: report._id }, { data: 1, _id: 0 }).lean();
+    const reportRows = itemDocs.map((i) => i.data);
+    if (reportRows.length === 0) {
+      return res.status(400).json({ success: false, error: "No transaction dataset available to sync from." });
+    }
+
+    const catKey = findCategoryKey(report.headers, reportRows[0]);
+    const metalKey = findBaseMetalKey(report.headers, reportRows[0]);
 
     if (!catKey) {
       return res.status(400).json({ success: false, error: "Category column not found in transaction dataset." });
     }
 
     const pairsMap = new Map<string, { name: string; baseMetal: string }>();
-    report.data.forEach((row) => {
+    reportRows.forEach((row) => {
       const c = String(row[catKey] || "").trim();
       const m = metalKey ? String(row[metalKey] || "").trim() : "";
       if (c && c !== "-" && c !== "N/A") {
