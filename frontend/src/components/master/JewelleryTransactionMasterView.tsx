@@ -236,9 +236,16 @@ export function JewelleryTransactionMasterView({ permissions }: JewelleryTransac
           body: JSON.stringify(payload),
         });
 
-        const result = await res.json();
-        if (!res.ok || !result.success) {
-          throw new Error(result.error || `Failed uploading batch ${i + 1} of ${totalBatches}`);
+        let result: any = null;
+        const responseText = await res.text();
+        try {
+          result = responseText ? JSON.parse(responseText) : {};
+        } catch {
+          result = { success: false, error: `Server error (${res.status} ${res.statusText || "Bad Gateway"})` };
+        }
+
+        if (!res.ok || !result || !result.success) {
+          throw new Error(result?.error || `Failed uploading batch ${i + 1} of ${totalBatches}`);
         }
 
         totalNewRowsInserted += result.newRowsInserted || 0;

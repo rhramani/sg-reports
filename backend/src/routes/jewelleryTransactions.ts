@@ -494,26 +494,34 @@ jewelleryTransactionsRouter.post("/upload", async (req: Request, res: Response) 
         }
       });
 
+      // Load all existing category/metal pairs in a single fast query
+      const existingDocs = await CategoryModel.find({}, { name: 1, baseMetal: 1 }).lean();
+      const existingSet = new Set<string>();
+      existingDocs.forEach((doc) => {
+        const cName = (doc.name || "").trim().toLowerCase();
+        const bMetal = (doc.baseMetal || "").trim().toLowerCase();
+        existingSet.add(`${cName}__${bMetal}`);
+      });
+
+      const newDocsToInsert: any[] = [];
       for (const { name: catName, baseMetal: metalVal } of pairsMap.values()) {
         categoriesFound.push(metalVal ? `${catName} (${metalVal})` : catName);
+        const matchKey = `${catName.trim().toLowerCase()}__${metalVal.trim().toLowerCase()}`;
 
-        const escapedName = catName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const escapedMetal = metalVal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-        const existing = await CategoryModel.findOne({
-          name: { $regex: new RegExp(`^${escapedName}$`, "i") },
-          baseMetal: { $regex: new RegExp(`^${escapedMetal}$`, "i") },
-        });
-
-        if (!existing) {
-          await CategoryModel.create({
+        if (!existingSet.has(matchKey)) {
+          existingSet.add(matchKey);
+          newDocsToInsert.push({
             name: catName,
             baseMetal: metalVal,
             description: metalVal ? `Auto-imported from ${fileName || "Excel"} (${metalVal})` : `Auto-imported from ${fileName || "Excel"}`,
             costing: 0,
           });
-          newCategoriesCreated++;
         }
+      }
+
+      if (newDocsToInsert.length > 0) {
+        await CategoryModel.insertMany(newDocsToInsert, { ordered: false }).catch(() => {});
+        newCategoriesCreated = newDocsToInsert.length;
       }
     }
 
