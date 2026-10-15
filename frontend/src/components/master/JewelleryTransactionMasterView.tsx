@@ -215,36 +215,49 @@ export function JewelleryTransactionMasterView({ permissions }: JewelleryTransac
         return norm !== "total" && norm !== "grand total" && !norm.startsWith("__empty");
       });
 
-      const payload = {
-        fileName: file.name,
-        reportName: file.name.replace(/\.[^/.]+$/, ""),
-        headers: extractedHeaders,
-        data: validRows,
-      };
+      const CHUNK_SIZE = 1500;
+      const totalBatches = Math.ceil(validRows.length / CHUNK_SIZE);
+      let totalNewRowsInserted = 0;
+      let totalDuplicateRowsSkipped = 0;
+      let totalNewCategoriesCreated = 0;
 
-      const res = await authFetch("/api/jewellery-transactions/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      for (let i = 0; i < totalBatches; i++) {
+        const batchData = validRows.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        const payload = {
+          fileName: file.name,
+          reportName: file.name.replace(/\.[^/.]+$/, ""),
+          headers: extractedHeaders,
+          data: batchData,
+        };
 
-      const result = await res.json();
-      if (res.ok && result.success) {
-        const insertMsg =
-          result.newRowsInserted > 0
-            ? `Inserted ${result.newRowsInserted.toLocaleString()} new entries (${result.duplicateRowsSkipped || 0} duplicate rows skipped)`
-            : `All ${result.duplicateRowsSkipped || 0} entries are already in database`;
+        const res = await authFetch("/api/jewellery-transactions/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-        const catMsg =
-          result.newCategoriesCreated > 0
-            ? `✨ ${result.newCategoriesCreated} new unique categories synchronized to Category Master.`
-            : `Categories are fully synchronized.`;
+        const result = await res.json();
+        if (!res.ok || !result.success) {
+          throw new Error(result.error || `Failed uploading batch ${i + 1} of ${totalBatches}`);
+        }
 
-        showToast(insertMsg, catMsg);
-        fetchTransactions();
-      } else {
-        showToast("Upload failed", result.error || "Could not insert data into database.", "error");
+        totalNewRowsInserted += result.newRowsInserted || 0;
+        totalDuplicateRowsSkipped += result.duplicateRowsSkipped || 0;
+        totalNewCategoriesCreated += result.newCategoriesCreated || 0;
       }
+
+      const insertMsg =
+        totalNewRowsInserted > 0
+          ? `Inserted ${totalNewRowsInserted.toLocaleString()} new entries (${totalDuplicateRowsSkipped.toLocaleString()} duplicate rows skipped)`
+          : `All ${totalDuplicateRowsSkipped.toLocaleString()} entries are already in database`;
+
+      const catMsg =
+        totalNewCategoriesCreated > 0
+          ? `✨ ${totalNewCategoriesCreated} new unique categories synchronized to Category Master.`
+          : `Categories are fully synchronized.`;
+
+      showToast(insertMsg, catMsg);
+      fetchTransactions();
     } catch (error: any) {
       console.error("Excel upload error:", error);
       showToast("Error processing Excel file", error.message || "Invalid Excel structure", "error");

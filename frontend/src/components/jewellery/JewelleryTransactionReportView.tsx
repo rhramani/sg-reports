@@ -157,7 +157,7 @@ export const PRESET_GROUP_DIMENSIONS: GroupDimensionOption[] = [
   { id: "BaseMetalClarity", label: "Base metal clarity", aliases: ["basemetalclarity", "base_metal_clarity", "metalclarity", "clarity", "purity"] },
   { id: "SalesPerson", label: "Sales person", aliases: ["salesperson", "salespersonname", "sales_person", "sales_person_name"] },
   { id: "SalesPersonHeadName", label: "Sales person head", aliases: ["salespersonheadname", "sales_person_head", "saleshead"] },
-  { id: "Order_CustomerName", label: "Customer wise", aliases: ["order_customername", "customername", "customer", "client", "clientname"] },
+  { id: "Order_CustomerName", label: "Customer wise", aliases: ["client", "clientname", "client_name", "order_customername", "customername", "customer", "party", "partyname", "party_name"] },
   { id: "BookAliasName", label: "Book alias name", aliases: ["bookaliasname", "book_alias_name", "bookalias", "bookname"] },
 ];
 
@@ -580,6 +580,8 @@ export function JewelleryTransactionReportView({
 
   const primaryFilteredColumns = useMemo(() => {
     const priorityKeywords = [
+      "client",
+      "clientname",
       "clientcity",
       "city",
       "statename",
@@ -588,7 +590,7 @@ export function JewelleryTransactionReportView({
       "categorygroup",
       "group",
       "order_customername",
-      "client",
+      "customername",
       "salesperson",
       "salespersonname",
       "salespersonheadname",
