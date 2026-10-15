@@ -160,6 +160,9 @@ export async function authFetch(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
+  if (init?.body && typeof init.body === "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
 
   const response = await fetch(input, {
     ...init,

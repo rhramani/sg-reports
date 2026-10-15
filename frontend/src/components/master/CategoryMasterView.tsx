@@ -19,6 +19,7 @@ import {
   Filter,
 } from "lucide-react";
 import { authFetch } from "@/lib/apiClient";
+import { Pagination } from "@/components/ui/Pagination";
 import type { PermissionActions } from "@shared/api";
 
 export interface CategoryItem {
@@ -46,6 +47,10 @@ export function CategoryMasterView({ permissions }: CategoryMasterViewProps) {
   const [syncing, setSyncing] = useState<boolean>(false);
   const [query, setQuery] = useState("");
   const [metalFilter, setMetalFilter] = useState("All");
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // Add / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -275,6 +280,19 @@ export function CategoryMasterView({ permissions }: CategoryMasterViewProps) {
     return list;
   }, [categories, query, metalFilter]);
 
+  // Reset to page 1 on search or filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query, metalFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredCategories.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const pagedCategories = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize;
+    return filteredCategories.slice(start, start + pageSize);
+  }, [filteredCategories, safeCurrentPage, pageSize]);
+
   return (
     <div className="w-full max-w-none px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* Toast Notification */}
@@ -476,7 +494,7 @@ export function CategoryMasterView({ permissions }: CategoryMasterViewProps) {
                   </td>
                 </tr>
               ) : (
-                filteredCategories.map((cat, index) => {
+                pagedCategories.map((cat, index) => {
                   const isEditingCosting = editingCostingId === cat._id;
 
                   return (
@@ -485,7 +503,7 @@ export function CategoryMasterView({ permissions }: CategoryMasterViewProps) {
                       className="hover:bg-slate-50/70 dark:hover:bg-slate-750/50 transition duration-150"
                     >
                       <td className="px-5 py-4 font-mono text-slate-400 font-bold text-center whitespace-nowrap">
-                        {index + 1}
+                        {(safeCurrentPage - 1) * pageSize + index + 1}
                       </td>
                       <td className="px-5 py-4">
                         <div className="font-bold text-slate-900 dark:text-white text-sm">
@@ -604,6 +622,22 @@ export function CategoryMasterView({ permissions }: CategoryMasterViewProps) {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        <Pagination
+          currentPage={safeCurrentPage}
+          totalPages={totalPages}
+          totalCount={filteredCategories.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setCurrentPage(1);
+          }}
+          pageSizeOptions={[10, 25, 50, 100]}
+          recordLabel="categories"
+          showAlways={true}
+        />
       </div>
 
       {/* Add / Edit Category Modal */}

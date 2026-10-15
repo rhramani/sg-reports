@@ -22,6 +22,10 @@ const Profile = lazy(() => import("./pages/Profile"));
 const JewelleryTransactions = lazy(() => import("./pages/JewelleryTransactions"));
 const Categories = lazy(() => import("./pages/Categories"));
 const JewelleryTransactionMaster = lazy(() => import("./pages/JewelleryTransactionMaster"));
+const CourierCustomerTab = lazy(() => import("./pages/CourierCustomerTab"));
+const CourierRateMaster = lazy(() => import("./pages/CourierRateMaster"));
+const CourierServiceProvider = lazy(() => import("./pages/CourierServiceProvider"));
+const CourierCreate = lazy(() => import("./pages/CourierCreate"));
 
 const queryClient = new QueryClient();
 
@@ -192,6 +196,63 @@ const App = () => (
             element={
               <ProtectedRoute>
                 <JewelleryTransactionMaster />
+              </ProtectedRoute>
+            }
+          />
+          {/* Courier Section Routes */}
+          <Route
+            path="/courier/customer-tab"
+            element={
+              <ProtectedRoute>
+                <CourierCustomerTab />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/courier/customers"
+            element={
+              <ProtectedRoute>
+                <CourierCustomerTab />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/courier/rate-master"
+            element={
+              <ProtectedRoute>
+                <CourierRateMaster />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/courier/service-provider"
+            element={
+              <ProtectedRoute>
+                <CourierServiceProvider />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/courier/service-providers"
+            element={
+              <ProtectedRoute>
+                <CourierServiceProvider />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/courier/create-courier"
+            element={
+              <ProtectedRoute>
+                <CourierCreate />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/courier"
+            element={
+              <ProtectedRoute>
+                <CourierCreate />
               </ProtectedRoute>
             }
           />

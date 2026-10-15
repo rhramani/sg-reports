@@ -218,3 +218,90 @@
   flex: 1;
 }
 
+/* ── Custom Scrollbars Matching Sidebar Color (#18476A) ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #18476A transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #18476A;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #123955;
+}
+
+/* Specific class utility */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #18476A transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #18476A;
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #123955;
+}
+
+/* Inside the dark navy sidebar */
+aside .custom-scrollbar,
+aside [class*="overflow-y"] {
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+aside .custom-scrollbar::-webkit-scrollbar-thumb,
+aside [class*="overflow-y"]::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.28);
+  border-radius: 9999px;
+}
+
+aside .custom-scrollbar::-webkit-scrollbar-thumb:hover,
+aside [class*="overflow-y"]::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.45);
+}
+
+/* Dark mode adjustments */
+.dark * {
+  scrollbar-color: #24587e transparent;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: #24587e;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #3172a2;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #24587e;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #3172a2;
+}
+

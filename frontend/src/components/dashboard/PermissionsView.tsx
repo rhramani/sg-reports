@@ -21,6 +21,10 @@ import {
   ChevronRight,
   Coins,
   FolderKanban,
+  Contact2,
+  DollarSign,
+  Truck,
+  PackagePlus,
 } from "lucide-react";
 import { authFetch } from "@/lib/apiClient";
 
@@ -55,6 +59,10 @@ const DEFAULT_MODULE_DEFINITIONS = [
   { name: "Users", icon: Users, category: "Administration", description: "Workspace members, roles, and invitations" },
   { name: "Roles", icon: Shield, category: "Administration", description: "Workspace role hierarchy and member assignments" },
   { name: "Permissions", icon: ShieldCheck, category: "Administration", description: "Granular action permissions per role & module" },
+  { name: "Customer Tab", icon: Contact2, category: "Courier", description: "Courier customers, delivery addresses, and contact directory" },
+  { name: "Rate Master", icon: DollarSign, category: "Courier", description: "Courier freight rate master, zone slabs, and fuel surcharges" },
+  { name: "Service Provider", icon: Truck, category: "Courier", description: "Logistics carrier partners, tracking URLs, and accounts" },
+  { name: "Create Courier", icon: PackagePlus, category: "Courier", description: "Consignment booking, waybill slip generation, and dispatch register" },
 ];
 
 const ACTION_COLUMNS: { key: keyof PermissionActions; label: string; icon: typeof Eye }[] = [

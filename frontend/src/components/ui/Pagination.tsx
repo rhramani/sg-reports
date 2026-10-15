@@ -18,6 +18,12 @@ interface PaginationProps {
   loading?: boolean;
   /** Extra class on the root element */
   className?: string;
+  /** Force render pagination bar even if totalPages <= 1 */
+  showAlways?: boolean;
+  /** Options for rows per page dropdown */
+  pageSizeOptions?: number[];
+  /** Callback when page size changes */
+  onPageSizeChange?: (size: number) => void;
 }
 
 /** How many page buttons to show on each side of the current page */
@@ -28,7 +34,7 @@ function getPageRange(current: number, total: number): (number | string)[] {
   const totalVisible = SIBLING_COUNT * 2 + 5; // first + last + siblings + current + 2 dots
 
   if (total <= totalVisible) {
-    return Array.from({ length: total }, (_, i) => i + 1);
+    return Array.from({ length: Math.max(1, total) }, (_, i) => i + 1);
   }
 
   const leftSibling = Math.max(current - SIBLING_COUNT, 1);
@@ -66,41 +72,63 @@ export function Pagination({
   recordLabel = "records",
   loading = false,
   className,
+  showAlways = false,
+  pageSizeOptions,
+  onPageSizeChange,
 }: PaginationProps) {
-  // Only render when there is more than one page (i.e. data > pageSize)
-  if (totalPages <= 1) return null;
+  // If not forcing showAlways, only render when there is more than one page
+  if (totalPages <= 1 && !showAlways) return null;
 
   const from = totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const to = Math.min(currentPage * pageSize, totalCount);
 
-  const pages = getPageRange(currentPage, totalPages);
+  const pages = getPageRange(currentPage, Math.max(1, totalPages));
 
   const btnBase =
     "inline-flex h-8 min-w-[32px] items-center justify-center rounded-lg border text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#18476A]/40 disabled:cursor-not-allowed disabled:opacity-40 select-none cursor-pointer";
   const btnGhost =
-    "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 px-2";
+    "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-900 dark:hover:text-white px-2";
   const btnActive =
-    "border-[#18476A] bg-[#18476A] text-white shadow-sm shadow-[#18476A]/20 px-2";
+    "border-[#18476A] bg-[#18476A] dark:border-cyan-600 dark:bg-cyan-600 text-white shadow-xs px-2";
 
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 border-t border-slate-100 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6",
+        "flex flex-col gap-3 border-t border-slate-200 dark:border-slate-700/80 bg-white/50 dark:bg-slate-850/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6",
         className,
       )}
     >
-      {/* Left — record count info */}
-      <p className="text-[11px] font-medium text-slate-500 shrink-0">
-        Showing{" "}
-        <span className="font-bold text-slate-800">{from}</span>
-        {" - "}
-        <span className="font-bold text-slate-800">{to}</span> of{" "}
-        <span className="font-bold text-slate-800">{totalCount}</span>{" "}
-        {recordLabel}
-      </p>
+      {/* Left — record count info & optional page size */}
+      <div className="flex flex-wrap items-center gap-4">
+        <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0">
+          Showing{" "}
+          <span className="font-bold text-slate-800 dark:text-slate-200">{from}</span>
+          {" - "}
+          <span className="font-bold text-slate-800 dark:text-slate-200">{to}</span> of{" "}
+          <span className="font-bold text-slate-800 dark:text-slate-200">{totalCount}</span>{" "}
+          {recordLabel}
+        </p>
+
+        {pageSizeOptions && onPageSizeChange && (
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+            <span>Rows:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
+              className="h-7 px-2 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-hidden cursor-pointer shadow-2xs"
+            >
+              {pageSizeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       {/* Right — controls */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 self-end sm:self-auto">
         {/* First page */}
         <button
           title="First page"
@@ -139,7 +167,7 @@ export function Pagination({
               <button
                 key={page}
                 onClick={() => onPageChange(page as number)}
-                disabled={loading}
+                disabled={loading || totalPages <= 1}
                 className={cn(
                   btnBase,
                   page === currentPage ? btnActive : btnGhost,

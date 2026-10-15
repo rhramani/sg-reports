@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, useLayoutEffect, type ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Bell,
@@ -13,11 +13,23 @@ import {
   Shield,
   ShieldCheck,
   Users,
+  Contact2,
+  DollarSign,
+  Truck,
+  PackagePlus,
 } from "lucide-react";
 import { SGReportLogo } from "@/components/SGReportLogo";
 import { authFetch, getAuthUser, getAuthToken, setAuthSession, clearAuthSession } from "@/lib/apiClient";
 import { AppLayoutContext } from "@/lib/AppLayoutContext";
 import type { PermissionActions } from "@shared/api";
+
+// Persistent sidebar scroll position across component re-mounts and navigations
+let savedSidebarScrollTop = 0;
+if (typeof window !== "undefined") {
+  try {
+    savedSidebarScrollTop = Number(sessionStorage.getItem("sg_sidebar_scroll_top") || "0");
+  } catch {}
+}
 
 // ── Navigation structure with Dropdown Groups ──────────────────────────────
 export interface NavItemConfig {
@@ -67,6 +79,16 @@ const navGroups: NavGroupConfig[] = [
       { label: "Permissions", moduleName: "Permissions", icon: ShieldCheck, path: "/permissions" },
     ],
   },
+  {
+    key: "courier",
+    label: "Courier",
+    items: [
+      { label: "Customer Tab", moduleName: "Customer Tab", icon: Contact2, path: "/courier/customer-tab" },
+      { label: "Rate Master", moduleName: "Rate Master", icon: DollarSign, path: "/courier/rate-master" },
+      { label: "Service Provider", moduleName: "Service Provider", icon: Truck, path: "/courier/service-provider" },
+      { label: "Create Courier", moduleName: "Create Courier", icon: PackagePlus, path: "/courier/create-courier" },
+    ],
+  },
 ];
 
 const moduleToPathMap: Record<string, string> = {
@@ -88,6 +110,11 @@ const moduleToPathMap: Record<string, string> = {
   "Report types": "/report-types",
   "Activity Log": "/activity-log",
   Profile: "/profile",
+  "Customer Tab": "/courier/customer-tab",
+  "Rate Master": "/courier/rate-master",
+  "Service Provider": "/courier/service-provider",
+  "Create Courier": "/courier/create-courier",
+  Courier: "/courier/create-courier",
 };
 
 const pathToModuleMap: Record<string, string> = {
@@ -108,6 +135,13 @@ const pathToModuleMap: Record<string, string> = {
   "/report-types": "Report types",
   "/activity-log": "Activity Log",
   "/profile": "Profile",
+  "/courier/customer-tab": "Customer Tab",
+  "/courier/customers": "Customer Tab",
+  "/courier/rate-master": "Rate Master",
+  "/courier/service-provider": "Service Provider",
+  "/courier/service-providers": "Service Provider",
+  "/courier/create-courier": "Create Courier",
+  "/courier": "Create Courier",
 };
 
 interface AppLayoutProps {
@@ -117,6 +151,37 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const sidebarScrollRef = useRef<HTMLDivElement>(null);
+
+  // Preserve and restore the sidebar scroll position across route changes
+  useLayoutEffect(() => {
+    const el = sidebarScrollRef.current;
+    if (!el) return;
+
+    // Restore saved scroll position immediately before paint
+    if (savedSidebarScrollTop > 0) {
+      el.scrollTop = savedSidebarScrollTop;
+    }
+
+    // Ensure the active nav item is visible within the sidebar viewport
+    const activeEl = el.querySelector<HTMLElement>('[data-active-nav="true"]');
+    if (activeEl) {
+      const elRect = el.getBoundingClientRect();
+      const activeRect = activeEl.getBoundingClientRect();
+      if (activeRect.top < elRect.top || activeRect.bottom > elRect.bottom) {
+        activeEl.scrollIntoView({ block: "nearest" });
+        savedSidebarScrollTop = el.scrollTop;
+      }
+    }
+  }, [location.pathname]);
+
+  const handleSidebarScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const top = e.currentTarget.scrollTop;
+    savedSidebarScrollTop = top;
+    try {
+      sessionStorage.setItem("sg_sidebar_scroll_top", String(top));
+    } catch {}
+  };
 
   const getModuleFromPath = (pathname: string): string => {
     const cleanPath = pathname.toLowerCase().replace(/\/$/, "") || "/";
@@ -247,7 +312,12 @@ export function AppLayout({ children }: AppLayoutProps) {
       moduleName === "Jewellery Transaction Excel Sheet" ||
       moduleName === "Jewellery Transaction Report" ||
       moduleName === "Category" ||
-      moduleName === "Category Master";
+      moduleName === "Category Master" ||
+      moduleName === "Customer Tab" ||
+      moduleName === "Rate Master" ||
+      moduleName === "Service Provider" ||
+      moduleName === "Create Courier" ||
+      moduleName === "Courier";
 
     if (isStandardWorkspaceModule) {
       return { view: true, add: true, update: true, delete: false, export: true };
@@ -352,12 +422,16 @@ export function AppLayout({ children }: AppLayoutProps) {
             </div>
           </div>
 
-          <div className="px-4 pt-6 overflow-y-auto flex-1 space-y-4 custom-scrollbar">
+          <div
+            ref={sidebarScrollRef}
+            onScroll={handleSidebarScroll}
+            className="px-4 pt-6 overflow-y-auto flex-1 space-y-4 custom-scrollbar"
+          >
             {visibleNavGroups.map((group) => {
-              const isCollapsed = Boolean(collapsedGroups[group.label]);
               const hasActiveChild = group.items.some((item) =>
                 item.path ? location.pathname === item.path : activeNav === (item.moduleName || item.label)
               );
+              const isCollapsed = Boolean(collapsedGroups[group.label]) && !hasActiveChild;
 
               return (
                 <div key={group.label} className="border-b border-white/5 pb-2 last:border-0">
@@ -365,18 +439,18 @@ export function AppLayout({ children }: AppLayoutProps) {
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.label)}
-                    className={`group flex w-full items-center justify-between px-2.5 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.14em] rounded-lg transition cursor-pointer ${
+                    className={`group flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] font-extrabold uppercase tracking-[0.14em] rounded-lg transition cursor-pointer ${
                       hasActiveChild
                         ? "text-cyan-300 bg-white/5"
                         : "text-white/90 hover:text-white hover:bg-white/10"
                     }`}
                   >
-                    <span className="flex items-center gap-2">
-                      <span>{group.label}</span>
+                    <span className="flex-1 text-left leading-snug pr-2">
+                      <span className="block text-left">{group.label}</span>
                     </span>
                     <ChevronDown
                       size={13}
-                      className={`text-white/70 transition-transform duration-200 ${
+                      className={`text-white/70 transition-transform duration-200 shrink-0 ${
                         isCollapsed ? "-rotate-90 text-white/50" : "rotate-0 text-white"
                       }`}
                     />
@@ -398,9 +472,19 @@ export function AppLayout({ children }: AppLayoutProps) {
                       return (
                         <button
                           key={item.label}
+                          type="button"
+                          data-active-nav={isItemActive ? "true" : undefined}
                           onClick={() => {
+                            if (sidebarScrollRef.current) {
+                              savedSidebarScrollTop = sidebarScrollRef.current.scrollTop;
+                              try {
+                                sessionStorage.setItem("sg_sidebar_scroll_top", String(savedSidebarScrollTop));
+                              } catch {}
+                            }
                             if (item.path) {
-                              navigate(item.path);
+                              if (location.pathname !== item.path) {
+                                navigate(item.path);
+                              }
                             } else {
                               navigateToModule(itemModule);
                             }
@@ -433,11 +517,19 @@ export function AppLayout({ children }: AppLayoutProps) {
           <div className="mt-auto p-4 border-t border-white/10">
             {getPermissionsForModule("Activity Log").view && (
               <button
+                type="button"
+                data-active-nav={activeNav === "Activity Log" ? "true" : undefined}
                 onClick={() => {
+                  if (sidebarScrollRef.current) {
+                    savedSidebarScrollTop = sidebarScrollRef.current.scrollTop;
+                    try {
+                      sessionStorage.setItem("sg_sidebar_scroll_top", String(savedSidebarScrollTop));
+                    } catch {}
+                  }
                   navigateToModule("Activity Log");
                   if (window.innerWidth < 1024) setSidebarOpen(false);
                 }}
-                className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[13px] transition ${
+                className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-[13px] transition cursor-pointer ${
                   activeNav === "Activity Log"
                     ? "bg-[#123955] text-white font-bold shadow-[inset_3px_0_0_#ffffff]"
                     : "text-white font-medium hover:bg-white/10"

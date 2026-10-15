@@ -16,6 +16,10 @@ const DEFAULT_MODULES = [
   "Roles",
   "Permissions",
   "Report types",
+  "Customer Tab",
+  "Rate Master",
+  "Service Provider",
+  "Create Courier",
 ];
 
 export function getDefaultModulePermissions(roleName: string): IModulePermission[] {
@@ -53,7 +57,11 @@ export function getDefaultModulePermissions(roleName: string): IModulePermission
         mod === "Reports" ||
         mod === "Dashboard" ||
         mod === "Jewellery Transaction" ||
-        mod === "Category";
+        mod === "Category" ||
+        mod === "Customer Tab" ||
+        mod === "Rate Master" ||
+        mod === "Service Provider" ||
+        mod === "Create Courier";
       return {
         module: mod,
         actions: {
@@ -72,7 +80,11 @@ export function getDefaultModulePermissions(roleName: string): IModulePermission
         mod === "Dashboard" ||
         mod === "Approvals" ||
         mod === "Jewellery Transaction" ||
-        mod === "Category";
+        mod === "Category" ||
+        mod === "Customer Tab" ||
+        mod === "Rate Master" ||
+        mod === "Service Provider" ||
+        mod === "Create Courier";
       return {
         module: mod,
         actions: {
