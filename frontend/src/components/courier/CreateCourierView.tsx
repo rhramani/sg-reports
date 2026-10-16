@@ -856,38 +856,40 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
 
               <!-- Middle Row -->
               <div class="slip-mid">
-                <!-- Triangle SVG -->
-                <div class="slip-tri-wrap">
-                  <svg viewBox="0 0 100 100" class="slip-tri-svg">
-                    <line x1="0" y1="100" x2="100" y2="0" stroke="#000000" stroke-width="2.5" />
-                    <g transform="rotate(-45, 50, 50)">
-                      <text x="50" y="38" text-anchor="middle" fill="#000000" font-weight="900" font-size="11.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
-                      <text x="50" y="64" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
-                    </g>
-                  </svg>
-                </div>
-                <div class="slip-tri-spacer"></div>
+                <!-- Left Column: Triangle in Top Corner + Oval Badge & VPP Fine/Amount shifted left & up -->
+                <div class="slip-left-col">
+                  <!-- Triangle SVG -->
+                  <div class="slip-tri-wrap">
+                    <svg viewBox="0 0 100 100" class="slip-tri-svg">
+                      <line x1="0" y1="100" x2="100" y2="0" stroke="#000000" stroke-width="2.5" />
+                      <g transform="rotate(-45, 50, 50)">
+                        <text x="50" y="38" text-anchor="middle" fill="#000000" font-weight="900" font-size="11.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
+                        <text x="50" y="64" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
+                      </g>
+                    </svg>
+                  </div>
 
-                <!-- Center: Oval & VPP Fine/Amount -->
-                <div class="slip-center">
-                  ${
-                    isOver1Lakh
-                      ? `<div class="slip-oval">${escapeHtml(tokenCode)}</div>`
-                      : ""
-                  }
-                  ${
-                    isVPP && (slip.qty || slip.rate)
-                      ? `
-                    <div class="slip-fine-amt">
-                      <div>FINE : ${escapeHtml(slip.qty || 1)}</div>
-                      <div>AMOUNT : ${escapeHtml(slip.rate || 0)}</div>
-                    </div>
-                  `
-                      : ""
-                  }
+                  <!-- Oval Badge & VPP Fine/Amount moved left & up -->
+                  <div class="slip-oval-block">
+                    ${
+                      isOver1Lakh
+                        ? `<div class="slip-oval">${escapeHtml(tokenCode)}</div>`
+                        : ""
+                    }
+                    ${
+                      isVPP && (slip.qty || slip.rate)
+                        ? `
+                      <div class="slip-fine-amt">
+                        <div class="slip-fine-line">FINE : ${escapeHtml(slip.qty || 1)}</div>
+                        <div class="slip-amt-line">AMOUNT : ${escapeHtml(slip.rate || 0)}</div>
+                      </div>
+                    `
+                        : ""
+                    }
+                  </div>
                 </div>
 
-                <!-- Right: Recipient -->
+                <!-- Right Side: Full Recipient Details (Expanded width, NO CUT, NO HIDE) -->
                 <div class="slip-right">
                   <div class="slip-to-city">TO :- ${escapeHtml(slip.destinationCity || "DELHI")}</div>
                   <div class="slip-cust-name">${escapeHtml(slip.customerName || "RECIPIENT")}</div>
@@ -1021,107 +1023,140 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       height: 36.8mm !important;
       min-height: 36.8mm !important;
       max-height: 36.8mm !important;
-      padding: 0.5mm 1.2mm !important;
+      padding: 0.6mm 1.5mm !important;
       border-bottom: 1.2px solid #000000 !important;
       display: flex !important;
-      align-items: center !important;
-      justify-content: space-between !important;
+      align-items: flex-start !important;
+      justify-content: flex-start !important;
       position: relative !important;
       overflow: hidden !important;
       box-sizing: border-box !important;
     }
+    .slip-left-col {
+      width: 26mm !important;
+      min-width: 26mm !important;
+      max-width: 26mm !important;
+      flex-shrink: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      position: relative !important;
+      padding-top: 9mm !important;
+      box-sizing: border-box !important;
+    }
     .slip-tri-wrap {
       position: absolute !important;
-      top: 0 !important;
-      left: 0 !important;
-      width: 17mm !important;
-      height: 17mm !important;
+      top: -0.6mm !important;
+      left: -1.5mm !important;
+      width: 14mm !important;
+      height: 14mm !important;
+      pointer-events: none !important;
     }
     .slip-tri-svg {
       width: 100% !important;
       height: 100% !important;
       display: block !important;
     }
-    .slip-tri-spacer {
-      width: 16mm !important;
-      flex-shrink: 0 !important;
-    }
-    .slip-center {
+    .slip-oval-block {
       display: flex !important;
       flex-direction: column !important;
       align-items: center !important;
-      justify-content: center !important;
-      flex-shrink: 0 !important;
-      width: 22mm !important;
-      text-align: center !important;
+      justify-content: flex-start !important;
+      width: 100% !important;
+      margin-top: 0.5mm !important;
+      margin-left: 3.5mm !important;
     }
     .slip-oval {
-      border: 1.3px solid #000000 !important;
+      border: 1.5px solid #000000 !important;
       border-radius: 50% !important;
-      padding: 0.5mm 1.5mm !important;
-      min-width: 13mm !important;
+      padding: 0.6mm 2.2mm !important;
+      min-width: 14mm !important;
       text-align: center !important;
-      font-size: 10.5pt !important;
+      font-size: 11.5pt !important;
       font-weight: 900 !important;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
       line-height: 1 !important;
       display: inline-block !important;
+      -webkit-text-stroke: 0.3px #000000 !important;
     }
     .slip-fine-amt {
-      font-size: 5.8pt !important;
+      font-size: 8pt !important;
       font-weight: 900 !important;
-      line-height: 1.15 !important;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+      line-height: 1.25 !important;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace, system-ui, sans-serif !important;
       text-align: center !important;
-      margin-top: 0.8mm !important;
+      margin-top: 3mm !important;
       text-transform: uppercase !important;
-    }
-    .slip-right {
-      width: 33mm !important;
-      flex-shrink: 0 !important;
+      letter-spacing: 0.25px !important;
+      white-space: nowrap !important;
       display: flex !important;
       flex-direction: column !important;
-      justify-content: center !important;
-      line-height: 1.12 !important;
+      gap: 1.5mm !important;
+      -webkit-text-stroke: 0.35px #000000 !important;
+    }
+    .slip-fine-amt .slip-amt-line {
+      margin-top: 1.5mm !important;
+    }
+    /* Right Side: Recipient Details - Expanded Width, NO CUT, NO HIDE */
+    .slip-right {
+      flex: 1 !important;
+      width: auto !important;
+      padding-left: 3mm !important;
+      padding-top: 2.5mm !important;
+      padding-right: 0.5mm !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: flex-start !important;
+      align-items: flex-start !important;
+      line-height: 1.15 !important;
       font-weight: 900 !important;
       text-transform: uppercase !important;
-      padding-left: 1mm !important;
-      overflow: hidden !important;
+      overflow: visible !important;
+      box-sizing: border-box !important;
     }
     .slip-to-city {
-      font-size: 7.2pt !important;
+      font-size: 7.8pt !important;
       font-weight: 900 !important;
       letter-spacing: 0.2px !important;
+      line-height: 1.15 !important;
+      -webkit-text-stroke: 0.2px #000000 !important;
     }
     .slip-cust-name {
-      font-size: 6.8pt !important;
+      font-size: 7.4pt !important;
       font-weight: 900 !important;
       margin-top: 0.3mm !important;
       word-break: break-word !important;
+      line-height: 1.15 !important;
+      -webkit-text-stroke: 0.2px #000000 !important;
     }
     .slip-addr {
-      font-size: 5.6pt !important;
-      font-weight: 800 !important;
-      color: #000000 !important;
-      line-height: 1.1 !important;
-      margin-top: 0.3mm !important;
-      display: -webkit-box !important;
-      -webkit-line-clamp: 2 !important;
-      -webkit-box-orient: vertical !important;
-      overflow: hidden !important;
-    }
-    .slip-pin {
-      font-size: 6pt !important;
-      font-weight: 900 !important;
-      margin-top: 0.3mm !important;
-      font-family: ui-monospace, monospace, sans-serif !important;
-    }
-    .slip-phones {
       font-size: 6.2pt !important;
       font-weight: 900 !important;
-      line-height: 1.1 !important;
+      color: #000000 !important;
+      line-height: 1.15 !important;
+      margin-top: 0.3mm !important;
+      word-break: break-word !important;
+      white-space: normal !important;
+      overflow: visible !important;
+      display: block !important;
+      -webkit-text-stroke: 0.15px #000000 !important;
+    }
+    .slip-pin {
+      font-size: 6.8pt !important;
+      font-weight: 900 !important;
+      margin-top: 0.3mm !important;
+      font-family: ui-monospace, monospace, sans-serif !important;
+      line-height: 1.15 !important;
+      -webkit-text-stroke: 0.2px #000000 !important;
+    }
+    .slip-phones {
+      font-size: 6.8pt !important;
+      font-weight: 900 !important;
+      line-height: 1.15 !important;
       font-family: ui-monospace, monospace, sans-serif !important;
       margin-top: 0.3mm !important;
+      -webkit-text-stroke: 0.2px #000000 !important;
     }
     .slip-bottom {
       height: 5.4mm !important;
@@ -1352,101 +1387,136 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
           .slip-row-middle {
             flex: 1 !important;
             height: 36.4mm !important;
-            max-height: 36.6mm !important;
-            padding: 0.5mm 1.5mm !important;
+            min-height: 36.6mm !important;
+            max-height: 36.8mm !important;
+            padding: 0.6mm 1.5mm !important;
             border-bottom: 1.2px solid #000 !important;
             display: flex !important;
-            align-items: center !important;
-            justify-content: space-between !important;
+            align-items: flex-start !important;
+            justify-content: flex-start !important;
             position: relative !important;
-            overflow: hidden !important;
             box-sizing: border-box !important;
           }
-          /* Triangle SVG in Middle */
-          .slip-triangle-svg {
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 17mm !important;
-            height: 17mm !important;
-          }
-          .slip-triangle-spacer {
-            width: 16mm !important;
+          .slip-left-col {
+            width: 26mm !important;
+            min-width: 26mm !important;
+            max-width: 26mm !important;
             flex-shrink: 0 !important;
-          }
-          /* Center Oval */
-          .slip-center-oval {
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
-            justify-content: center !important;
-            width: 22mm !important;
-            text-align: center !important;
-            flex-shrink: 0 !important;
+            justify-content: flex-start !important;
+            position: relative !important;
+            padding-top: 9mm !important;
+            box-sizing: border-box !important;
+          }
+          .slip-triangle-svg {
+            position: absolute !important;
+            top: -0.6mm !important;
+            left: -1.5mm !important;
+            width: 14mm !important;
+            height: 14mm !important;
+            pointer-events: none !important;
+          }
+          .slip-oval-block {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            width: 100% !important;
+            margin-top: 0.5mm !important;
+            margin-left: 3.5mm !important;
           }
           .slip-oval-badge {
-            border: 1.3px solid #000 !important;
+            border: 1.5px solid #000 !important;
             border-radius: 50% !important;
-            padding: 0.5mm 1.5mm !important;
-            min-width: 13mm !important;
+            padding: 0.6mm 2.2mm !important;
+            min-width: 14mm !important;
             text-align: center !important;
-            font-size: 10.5pt !important;
+            font-size: 11.5pt !important;
             font-weight: 900 !important;
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
             line-height: 1 !important;
             display: inline-block !important;
+            -webkit-text-stroke: 0.3px #000 !important;
           }
           .slip-fine-rate-block {
-            font-size: 5.8pt !important;
+            font-size: 8pt !important;
             font-weight: 900 !important;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-            line-height: 1.15 !important;
-            margin-top: 0.8mm !important;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace, system-ui, sans-serif !important;
+            line-height: 1.25 !important;
+            margin-top: 3mm !important;
             text-align: center !important;
             text-transform: uppercase !important;
+            letter-spacing: 0.25px !important;
+            white-space: nowrap !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 1.5mm !important;
+            -webkit-text-stroke: 0.35px #000 !important;
           }
-          /* Right: Recipient Details */
+          .slip-fine-rate-block .slip-amt-line {
+            margin-top: 1.5mm !important;
+          }
+          /* Right: Recipient Details - Expanded Width, NO CUT, NO HIDE */
           .slip-recipient-box {
-            width: 33mm !important;
-            max-width: 34mm !important;
-            padding-left: 1mm !important;
+            flex: 1 !important;
+            width: auto !important;
+            padding-left: 3mm !important;
+            padding-top: 2.5mm !important;
+            padding-right: 0.5mm !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: flex-start !important;
+            align-items: flex-start !important;
+            line-height: 1.15 !important;
             font-weight: 900 !important;
-            line-height: 1.12 !important;
-            flex-shrink: 0 !important;
-            overflow: hidden !important;
+            text-transform: uppercase !important;
+            overflow: visible !important;
+            box-sizing: border-box !important;
           }
           .slip-recipient-city {
-            font-size: 7pt !important;
+            font-size: 7.8pt !important;
             font-weight: 900 !important;
-            text-transform: uppercase !important;
+            letter-spacing: 0.2px !important;
+            line-height: 1.15 !important;
+            -webkit-text-stroke: 0.2px #000 !important;
           }
           .slip-recipient-name {
-            font-size: 7pt !important;
+            font-size: 7.4pt !important;
             font-weight: 900 !important;
-            text-transform: uppercase !important;
             margin-top: 0.3mm !important;
+            word-break: break-word !important;
+            line-height: 1.15 !important;
+            -webkit-text-stroke: 0.2px #000 !important;
           }
           .slip-recipient-addr {
-            font-size: 5.6pt !important;
-            font-weight: 800 !important;
-            line-height: 1.1 !important;
+            font-size: 6.2pt !important;
+            font-weight: 900 !important;
+            color: #000000 !important;
+            line-height: 1.15 !important;
             margin-top: 0.3mm !important;
-            display: -webkit-box !important;
-            -webkit-line-clamp: 2 !important;
-            -webkit-box-orient: vertical !important;
-            overflow: hidden !important;
+            word-break: break-word !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            display: block !important;
+            -webkit-text-stroke: 0.15px #000 !important;
           }
           .slip-recipient-pin {
-            font-size: 6.2pt !important;
+            font-size: 6.8pt !important;
             font-weight: 900 !important;
             margin-top: 0.3mm !important;
+            font-family: ui-monospace, monospace, sans-serif !important;
+            line-height: 1.15 !important;
+            -webkit-text-stroke: 0.2px #000 !important;
           }
           .slip-recipient-phone {
-            font-size: 6.2pt !important;
+            font-size: 6.8pt !important;
             font-weight: 900 !important;
-            font-family: monospace !important;
+            line-height: 1.15 !important;
+            font-family: ui-monospace, monospace, sans-serif !important;
             margin-top: 0.3mm !important;
-            line-height: 1.1 !important;
+            -webkit-text-stroke: 0.2px #000 !important;
           }
           /* Row 3: Bottom Sender Line */
           .slip-row-sender {
@@ -3143,112 +3213,111 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                       </div>
 
                       {/* 2. MIDDLE ROW */}
-                      <div className="slip-row-middle py-2 px-2.5 relative flex-1 flex items-center justify-between border-b-2 border-black min-h-[140px] overflow-hidden">
-                        {/* Left: Diagonal Cross Line Touching Top Divider and Side Border */}
-                        <svg
-                          className="slip-triangle-svg absolute top-0 left-0 w-[74px] h-[74px] pointer-events-none select-none"
-                          viewBox="0 0 100 100"
-                        >
-                          <line
-                            x1="0"
-                            y1="100"
-                            x2="100"
-                            y2="0"
-                            stroke="black"
-                            strokeWidth="2.5"
-                          />
-                          <g transform="rotate(-45 50 50)">
-                            <text
-                              x="50"
-                              y="38"
-                              textAnchor="middle"
-                              fill="black"
-                              fontWeight="900"
-                              fontSize="11.5"
-                              letterSpacing="0.4"
-                              fontFamily="system-ui, -apple-system, sans-serif"
-                            >
-                              Insurance
-                            </text>
-                            <text
-                              x="50"
-                              y="64"
-                              textAnchor="middle"
-                              fill="black"
-                              fontWeight="900"
-                              fontSize={
-                                getTriangleBadgeAmount(
-                                  getShipmentValuation(slip),
-                                  slip.insurance,
-                                ).length > 7
-                                  ? "10"
-                                  : getTriangleBadgeAmount(
-                                        getShipmentValuation(slip),
-                                        slip.insurance,
-                                      ).length > 5
-                                    ? "11.5"
-                                    : "13"
-                              }
-                              letterSpacing="0.3"
-                              fontFamily="ui-monospace, monospace"
-                            >
-                              {getTriangleBadgeAmount(
-                                getShipmentValuation(slip),
-                                slip.insurance,
-                              )}
-                            </text>
-                          </g>
-                        </svg>
-                        <div className="slip-triangle-spacer w-[74px] shrink-0" />
-
-                        {/* Middle Section: Oval & Side of Round (Fine & Rate) */}
-                        <div className="slip-center-oval flex flex-col items-center justify-center shrink-0">
-                          {isShipmentOver1Lakh(
-                            getShipmentValuation(slip),
-                            slip.insurance,
-                          ) && (
-                            <div className="slip-oval-badge border-2 border-black rounded-[50%/50%] px-3 py-1 min-w-[78px] text-center shadow-xs">
-                              <span className="text-base font-black tracking-wider font-mono">
-                                {getRateInsuranceCode(
+                      <div className="slip-row-middle py-1.5 px-2 relative flex-1 flex items-start justify-start border-b-2 border-black min-h-[140px] overflow-hidden gap-1">
+                        {/* Left Column: Triangle in Corner + Oval Badge & VPP Fine/Amount */}
+                        <div className="slip-left-col relative w-[135px] shrink-0 flex flex-col items-center justify-start pt-10">
+                          {/* Left: Diagonal Cross Line Touching Top Divider and Side Border */}
+                          <svg
+                            className="slip-triangle-svg absolute top-0 left-0 w-[64px] h-[64px] pointer-events-none select-none"
+                            viewBox="0 0 100 100"
+                          >
+                            <line
+                              x1="0"
+                              y1="100"
+                              x2="100"
+                              y2="0"
+                              stroke="black"
+                              strokeWidth="2.5"
+                            />
+                            <g transform="rotate(-45 50 50)">
+                              <text
+                                x="50"
+                                y="38"
+                                textAnchor="middle"
+                                fill="black"
+                                fontWeight="900"
+                                fontSize="11.5"
+                                letterSpacing="0.4"
+                                fontFamily="system-ui, -apple-system, sans-serif"
+                              >
+                                Insurance
+                              </text>
+                              <text
+                                x="50"
+                                y="64"
+                                textAnchor="middle"
+                                fill="black"
+                                fontWeight="900"
+                                fontSize={
+                                  getTriangleBadgeAmount(
+                                    getShipmentValuation(slip),
+                                    slip.insurance,
+                                  ).length > 7
+                                    ? "10"
+                                    : getTriangleBadgeAmount(
+                                          getShipmentValuation(slip),
+                                          slip.insurance,
+                                        ).length > 5
+                                      ? "11.5"
+                                      : "13"
+                                }
+                                letterSpacing="0.3"
+                                fontFamily="ui-monospace, monospace"
+                              >
+                                {getTriangleBadgeAmount(
                                   getShipmentValuation(slip),
                                   slip.insurance,
                                 )}
-                              </span>
-                            </div>
-                          )}
-                          {/* Beside Round Oval: Fine & Rate (Only shown for VPP, hidden for Normal) */}
-                          {slip.courierType === "VPP" &&
-                          (slip.qty || slip.rate) ? (
-                            <div className="slip-fine-rate-block text-center font-black text-black uppercase font-mono text-[10px] leading-tight mt-1 tracking-wider shrink-0">
-                              <div>FINE : {slip.qty || 1}</div>
-                              <div>AMOUNT : {slip.rate || 0}</div>
-                            </div>
-                          ) : null}
+                              </text>
+                            </g>
+                          </svg>
+
+                          {/* Oval & Fine/Rate with comfortable clearance */}
+                          <div className="slip-oval-block flex flex-col items-center justify-start w-full ml-3.5 mt-0.5">
+                            {isShipmentOver1Lakh(
+                              getShipmentValuation(slip),
+                              slip.insurance,
+                            ) && (
+                              <div className="slip-oval-badge border-2 border-black rounded-[50%/50%] px-3 py-1 min-w-[78px] text-center shadow-xs">
+                                <span className="text-[17px] font-black tracking-wider font-mono">
+                                  {getRateInsuranceCode(
+                                    getShipmentValuation(slip),
+                                    slip.insurance,
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                            {/* Beside Round Oval: Fine & Rate (Only shown for VPP, hidden for Normal) */}
+                            {slip.courierType === "VPP" &&
+                            (slip.qty || slip.rate) ? (
+                              <div className="slip-fine-rate-block text-center font-black text-black uppercase font-mono text-[12.5px] leading-tight mt-3.5 tracking-wide shrink-0 flex flex-col gap-1.5 whitespace-nowrap">
+                                <div className="slip-fine-line">FINE : {slip.qty || 1}</div>
+                                <div className="slip-amt-line mt-1.5">AMOUNT : {slip.rate || 0}</div>
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
 
-                        {/* Spacer pushing recipient to right */}
-                        <div className="flex-1" />
-
-                        {/* Right: Recipient Details shifted right */}
-                        <div className="slip-recipient-box text-left pl-2 pr-1 w-[195px] max-w-[205px] text-[11px] font-black text-black leading-tight shrink-0 overflow-hidden">
-                          <div className="slip-recipient-city uppercase tracking-wide font-black text-black">
+                        {/* Right: Full Recipient Details (Expanded width, NO CUT, NO HIDE) */}
+                        <div className="slip-recipient-box flex-1 text-left pl-3 pr-1 pt-2.5 text-[12px] font-black text-black leading-tight overflow-visible">
+                          <div className="slip-recipient-city uppercase tracking-wide font-black text-black text-[12.5px]">
                             TO :- {slip.destinationCity || "DELHI"}
                           </div>
-                          <div className="slip-recipient-name uppercase mt-0.5 text-black font-black truncate">
+                          <div className="slip-recipient-name uppercase mt-0.5 text-black font-black text-[12px]">
                             {slip.customerName || "RECIPIENT"}
                           </div>
                           {slip.destinationAddress && (
-                            <div className="slip-recipient-addr text-[10px] font-black text-black mt-0.5 leading-tight break-words line-clamp-2">
+                            <div className="slip-recipient-addr text-[11px] font-black text-black mt-0.5 leading-tight break-words">
                               {slip.destinationAddress}
                             </div>
                           )}
                           {slip.destinationPincode && (
-                            <div className="slip-recipient-pin text-[10.5px] font-black text-black leading-tight mt-0.5">
+                            <div className="slip-recipient-pin text-[11.5px] font-black text-black leading-tight mt-0.5 font-mono">
                               PIN - {slip.destinationPincode}
                             </div>
                           )}
                           {/* Phone Numbers - display both if available, bold with dot */}
-                          <div className="slip-recipient-phone mt-0.5 font-mono font-black text-black tracking-tight text-[10.5px] leading-tight space-y-0.5">
+                          <div className="slip-recipient-phone mt-0.5 font-mono font-black text-black tracking-tight text-[11.5px] leading-tight space-y-0.5">
                             {getShipmentPhones(
                               slip.customerPhone,
                               slip.customerPhone2,
