@@ -256,9 +256,11 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
   // Search & Filter in Register
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Print Slip Modal (Image 2)
+  // Print Slip Modal (Image 2) & Multi-Select Print
   const [printModalOpen, setPrintModalOpen] = useState(false);
   const [slipToPrint, setSlipToPrint] = useState<CourierShipment | null>(null);
+  const [slipsToPrint, setSlipsToPrint] = useState<CourierShipment[]>([]);
+  const [selectedShipmentIds, setSelectedShipmentIds] = useState<string[]>([]);
 
   // Edit Modal
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -456,6 +458,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       if (res.ok && data.success) {
         showToast(`Consignment ${data.data.awbNumber} booked successfully!`);
         setSlipToPrint(data.data);
+        setSlipsToPrint([data.data]);
         setPrintModalOpen(true);
         // Reset form
         generateNewAwb();
@@ -575,6 +578,9 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
         );
         setDeleteModalOpen(false);
         setShipmentToDelete(null);
+        setSelectedShipmentIds((prev) =>
+          prev.filter((id) => id !== shipmentToDelete._id)
+        );
         loadData();
       } else {
         showToast(data.error || "Failed to delete consignment", "error");
@@ -732,14 +738,435 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
     }
   };
 
-  // Trigger Print Slip
-  const handlePrintSlip = (shipment: CourierShipment) => {
-    setSlipToPrint(shipment);
+  // Multi-selection handlers
+  const handleToggleSelectOne = (id: string) => {
+    setSelectedShipmentIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectPage = () => {
+    const pageIds = pagedShipments.map((s) => s._id);
+    const allPageSelected =
+      pageIds.length > 0 &&
+      pageIds.every((id) => selectedShipmentIds.includes(id));
+    if (allPageSelected) {
+      setSelectedShipmentIds((prev) =>
+        prev.filter((id) => !pageIds.includes(id))
+      );
+    } else {
+      setSelectedShipmentIds((prev) =>
+        Array.from(new Set([...prev, ...pageIds]))
+      );
+    }
+  };
+
+  const handleSelectAllFiltered = () => {
+    setSelectedShipmentIds(filteredShipments.map((s) => s._id));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedShipmentIds([]);
+  };
+
+  const handlePrintSelected = () => {
+    const selected = shipments.filter((s) =>
+      selectedShipmentIds.includes(s._id)
+    );
+    if (selected.length === 0) {
+      showToast("Please select at least one consignment to print", "error");
+      return;
+    }
+    setSlipsToPrint(selected);
+    setSlipToPrint(selected[0]);
     setPrintModalOpen(true);
   };
 
+  // Trigger Print Slip for a single shipment
+  const handlePrintSlip = (shipment: CourierShipment) => {
+    setSlipToPrint(shipment);
+    setSlipsToPrint([shipment]);
+    setPrintModalOpen(true);
+  };
+
+  const escapeHtml = (str: string | number | undefined | null) => {
+    if (str === undefined || str === null) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  };
+
+  // Dedicated thermal print via isolated iframe (eliminates modal fixed/overflow clipping and multi-page overlaps)
+  const printConsignmentSlips = (slips: CourierShipment[]) => {
+    if (!slips.length) return;
+
+    // Remove any leftover thermal print iframe
+    const existingIframe = document.getElementById("thermal-print-iframe");
+    if (existingIframe) {
+      existingIframe.remove();
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "thermal-print-iframe";
+    iframe.setAttribute(
+      "style",
+      "position:fixed;top:-10000px;left:-10000px;width:75mm;height:50mm;border:0;visibility:hidden;",
+    );
+    document.body.appendChild(iframe);
+
+    const slipsHtml = slips
+      .map((slip) => {
+        const isVPP = slip.courierType === "VPP";
+        const paymentHeader = isVPP
+          ? "VPP"
+          : `IS:- ${(slip.paymentStatus || "UNPAID").toUpperCase()}`;
+        const providerHeader = `SERVICE PROVIDER :- ${slip.serviceProvider || "JAY AMBE LOGISTIC"}`;
+        const valuation = getShipmentValuation(slip);
+        const isOver1Lakh = isShipmentOver1Lakh(valuation, slip.insurance);
+        const triangleAmount = getTriangleBadgeAmount(valuation, slip.insurance);
+        const tokenCode = getRateInsuranceCode(valuation, slip.insurance);
+        const phones = getShipmentPhones(
+          slip.customerPhone,
+          slip.customerPhone2,
+          slip.customerName,
+          slip.customerCode,
+          customers,
+        );
+        const senderLine =
+          slip.fromSender || "From :- S G SURAT 9601511329 - 7405415105";
+
+        const triFontSize =
+          triangleAmount.length > 7
+            ? "10"
+            : triangleAmount.length > 5
+              ? "11.5"
+              : "13";
+
+        return `
+          <div class="slip-page">
+            <div class="slip-card">
+              <!-- Top Row -->
+              <div class="slip-top">
+                <div class="slip-top-left">${escapeHtml(paymentHeader)}</div>
+                <div class="slip-top-right">${escapeHtml(providerHeader)}</div>
+              </div>
+
+              <!-- Middle Row -->
+              <div class="slip-mid">
+                <!-- Triangle SVG -->
+                <div class="slip-tri-wrap">
+                  <svg viewBox="0 0 100 100" class="slip-tri-svg">
+                    <line x1="0" y1="100" x2="100" y2="0" stroke="#000000" stroke-width="2.5" />
+                    <g transform="rotate(-45, 50, 50)">
+                      <text x="50" y="38" text-anchor="middle" fill="#000000" font-weight="900" font-size="11.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
+                      <text x="50" y="64" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
+                    </g>
+                  </svg>
+                </div>
+                <div class="slip-tri-spacer"></div>
+
+                <!-- Center: Oval & VPP Fine/Amount -->
+                <div class="slip-center">
+                  ${
+                    isOver1Lakh
+                      ? `<div class="slip-oval">${escapeHtml(tokenCode)}</div>`
+                      : ""
+                  }
+                  ${
+                    isVPP && (slip.qty || slip.rate)
+                      ? `
+                    <div class="slip-fine-amt">
+                      <div>FINE : ${escapeHtml(slip.qty || 1)}</div>
+                      <div>AMOUNT : ${escapeHtml(slip.rate || 0)}</div>
+                    </div>
+                  `
+                      : ""
+                  }
+                </div>
+
+                <!-- Right: Recipient -->
+                <div class="slip-right">
+                  <div class="slip-to-city">TO :- ${escapeHtml(slip.destinationCity || "DELHI")}</div>
+                  <div class="slip-cust-name">${escapeHtml(slip.customerName || "RECIPIENT")}</div>
+                  ${
+                    slip.destinationAddress
+                      ? `<div class="slip-addr">${escapeHtml(slip.destinationAddress)}</div>`
+                      : ""
+                  }
+                  ${
+                    slip.destinationPincode
+                      ? `<div class="slip-pin">PIN - ${escapeHtml(slip.destinationPincode)}</div>`
+                      : ""
+                  }
+                  <div class="slip-phones">
+                    ${
+                      phones.length > 0
+                        ? phones
+                            .map((p) => `<div>${escapeHtml(p)}.</div>`)
+                            .join("")
+                        : "<div>—</div>"
+                    }
+                  </div>
+                </div>
+              </div>
+
+              <!-- Bottom Row -->
+              <div class="slip-bottom">
+                ${escapeHtml(senderLine)}
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) return;
+
+    iframeDoc.open();
+    iframeDoc.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Consignment Labels (75mm x 50mm)</title>
+  <style>
+    @page {
+      size: 75mm 50mm;
+      margin: 0;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+      width: 75mm !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+      -webkit-font-smoothing: antialiased;
+    }
+    .slip-page {
+      width: 75mm !important;
+      height: 50mm !important;
+      max-width: 75mm !important;
+      max-height: 50mm !important;
+      page-break-after: always !important;
+      break-after: page !important;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+      padding: 0.8mm !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      overflow: hidden !important;
+      box-sizing: border-box !important;
+      background: #ffffff !important;
+    }
+    .slip-page:last-child {
+      page-break-after: auto !important;
+      break-after: auto !important;
+    }
+    .slip-card {
+      width: 73.4mm !important;
+      height: 48.4mm !important;
+      max-width: 73.4mm !important;
+      max-height: 48.4mm !important;
+      border: 1.5px solid #000000 !important;
+      border-radius: 2px !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: space-between !important;
+      overflow: hidden !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+      box-sizing: border-box !important;
+    }
+    .slip-top {
+      height: 5.8mm !important;
+      min-height: 5.8mm !important;
+      max-height: 5.8mm !important;
+      padding: 0.5mm 1.5mm !important;
+      border-bottom: 1.2px solid #000000 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      font-size: 7.2pt !important;
+      font-weight: 900 !important;
+      line-height: 1 !important;
+      box-sizing: border-box !important;
+      flex-shrink: 0 !important;
+    }
+    .slip-top-left {
+      text-transform: uppercase !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      flex-shrink: 0 !important;
+    }
+    .slip-top-right {
+      text-transform: uppercase !important;
+      text-align: right !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      flex-shrink: 0 !important;
+    }
+    .slip-mid {
+      flex: 1 !important;
+      height: 36.8mm !important;
+      min-height: 36.8mm !important;
+      max-height: 36.8mm !important;
+      padding: 0.5mm 1.2mm !important;
+      border-bottom: 1.2px solid #000000 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      position: relative !important;
+      overflow: hidden !important;
+      box-sizing: border-box !important;
+    }
+    .slip-tri-wrap {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 17mm !important;
+      height: 17mm !important;
+    }
+    .slip-tri-svg {
+      width: 100% !important;
+      height: 100% !important;
+      display: block !important;
+    }
+    .slip-tri-spacer {
+      width: 16mm !important;
+      flex-shrink: 0 !important;
+    }
+    .slip-center {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      flex-shrink: 0 !important;
+      width: 22mm !important;
+      text-align: center !important;
+    }
+    .slip-oval {
+      border: 1.3px solid #000000 !important;
+      border-radius: 50% !important;
+      padding: 0.5mm 1.5mm !important;
+      min-width: 13mm !important;
+      text-align: center !important;
+      font-size: 10.5pt !important;
+      font-weight: 900 !important;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+      line-height: 1 !important;
+      display: inline-block !important;
+    }
+    .slip-fine-amt {
+      font-size: 5.8pt !important;
+      font-weight: 900 !important;
+      line-height: 1.15 !important;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+      text-align: center !important;
+      margin-top: 0.8mm !important;
+      text-transform: uppercase !important;
+    }
+    .slip-right {
+      width: 33mm !important;
+      flex-shrink: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: center !important;
+      line-height: 1.12 !important;
+      font-weight: 900 !important;
+      text-transform: uppercase !important;
+      padding-left: 1mm !important;
+      overflow: hidden !important;
+    }
+    .slip-to-city {
+      font-size: 7.2pt !important;
+      font-weight: 900 !important;
+      letter-spacing: 0.2px !important;
+    }
+    .slip-cust-name {
+      font-size: 6.8pt !important;
+      font-weight: 900 !important;
+      margin-top: 0.3mm !important;
+      word-break: break-word !important;
+    }
+    .slip-addr {
+      font-size: 5.6pt !important;
+      font-weight: 800 !important;
+      color: #000000 !important;
+      line-height: 1.1 !important;
+      margin-top: 0.3mm !important;
+      display: -webkit-box !important;
+      -webkit-line-clamp: 2 !important;
+      -webkit-box-orient: vertical !important;
+      overflow: hidden !important;
+    }
+    .slip-pin {
+      font-size: 6pt !important;
+      font-weight: 900 !important;
+      margin-top: 0.3mm !important;
+      font-family: ui-monospace, monospace, sans-serif !important;
+    }
+    .slip-phones {
+      font-size: 6.2pt !important;
+      font-weight: 900 !important;
+      line-height: 1.1 !important;
+      font-family: ui-monospace, monospace, sans-serif !important;
+      margin-top: 0.3mm !important;
+    }
+    .slip-bottom {
+      height: 5.4mm !important;
+      min-height: 5.4mm !important;
+      max-height: 5.4mm !important;
+      padding: 0.5mm 1.5mm !important;
+      display: flex !important;
+      align-items: center !important;
+      font-size: 6pt !important;
+      font-weight: 900 !important;
+      line-height: 1 !important;
+      text-transform: uppercase !important;
+      overflow: hidden !important;
+      white-space: nowrap !important;
+      text-overflow: ellipsis !important;
+      box-sizing: border-box !important;
+      flex-shrink: 0 !important;
+    }
+  </style>
+</head>
+<body>
+  ${slipsHtml}
+</body>
+</html>`);
+    iframeDoc.close();
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (err) {
+        console.error("Print iframe failed, fallback to window.print:", err);
+        window.print();
+      }
+      setTimeout(() => {
+        iframe.remove();
+      }, 3000);
+    }, 300);
+  };
+
   const executePrint = () => {
-    window.print();
+    const slips =
+      slipsToPrint.length > 0 ? slipsToPrint : slipToPrint ? [slipToPrint] : [];
+    if (!slips.length) return;
+    printConsignmentSlips(slips);
   };
 
   // Export CSV
@@ -825,12 +1252,23 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
         </div>
       )}
 
-      {/* Print Stylesheet */}
+      {/* Print Stylesheet for 75mm x 50mm Thermal Labels */}
       <style>{`
         @media print {
           @page {
-            size: auto;
-            margin: 4mm;
+            size: 75mm 50mm;
+            margin: 0mm;
+          }
+          *, *::before, *::after {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            box-sizing: border-box !important;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+            width: 75mm !important;
           }
           body * {
             visibility: hidden !important;
@@ -839,34 +1277,196 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
             visibility: visible !important;
           }
           #print-area-wrapper {
-            position: fixed !important;
+            position: absolute !important;
             left: 0 !important;
             top: 0 !important;
-            width: 100vw !important;
-            height: auto !important;
-            display: flex !important;
-            align-items: flex-start !important;
-            justify-content: center !important;
-            background: #fff !important;
-            padding: 0 !important;
+            width: 75mm !important;
             margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+            display: block !important;
             z-index: 999999 !important;
           }
-          #printable-courier-slip {
-            width: 540px !important;
-            max-width: 100% !important;
-            box-shadow: none !important;
-            border: 2px solid #000 !important;
-            border-radius: 4px !important;
-            page-break-inside: avoid !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            color: #000 !important;
-            font-weight: 900 !important;
+          .print-preview-badge {
+            display: none !important;
           }
-          #printable-courier-slip, #printable-courier-slip * {
+          .print-slip-item {
+            width: 75mm !important;
+            height: 50mm !important;
+            max-height: 50mm !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            margin: 0 !important;
+            padding: 0.8mm !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
+          }
+          .print-slip-item:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+          .printable-courier-slip, #printable-courier-slip {
+            width: 73.4mm !important;
+            height: 48.4mm !important;
+            max-width: 73.4mm !important;
+            max-height: 48.4mm !important;
+            border: 1.5px solid #000 !important;
+            border-radius: 2px !important;
+            box-shadow: none !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            overflow: hidden !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            background: #fff !important;
             color: #000 !important;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+            box-sizing: border-box !important;
+          }
+          .printable-courier-slip *, #printable-courier-slip * {
+            color: #000 !important;
+          }
+          /* Row 1: Top Bar */
+          .slip-row-top {
+            height: 6mm !important;
+            min-height: 6mm !important;
+            max-height: 6.2mm !important;
+            padding: 0.5mm 1.5mm !important;
+            border-bottom: 1.2px solid #000 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            font-size: 7.2pt !important;
             font-weight: 900 !important;
+            line-height: 1 !important;
+            box-sizing: border-box !important;
+            flex-shrink: 0 !important;
+          }
+          /* Row 2: Middle Area */
+          .slip-row-middle {
+            flex: 1 !important;
+            height: 36.4mm !important;
+            max-height: 36.6mm !important;
+            padding: 0.5mm 1.5mm !important;
+            border-bottom: 1.2px solid #000 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            position: relative !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
+          }
+          /* Triangle SVG in Middle */
+          .slip-triangle-svg {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 17mm !important;
+            height: 17mm !important;
+          }
+          .slip-triangle-spacer {
+            width: 16mm !important;
+            flex-shrink: 0 !important;
+          }
+          /* Center Oval */
+          .slip-center-oval {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 22mm !important;
+            text-align: center !important;
+            flex-shrink: 0 !important;
+          }
+          .slip-oval-badge {
+            border: 1.3px solid #000 !important;
+            border-radius: 50% !important;
+            padding: 0.5mm 1.5mm !important;
+            min-width: 13mm !important;
+            text-align: center !important;
+            font-size: 10.5pt !important;
+            font-weight: 900 !important;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+            line-height: 1 !important;
+            display: inline-block !important;
+          }
+          .slip-fine-rate-block {
+            font-size: 5.8pt !important;
+            font-weight: 900 !important;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+            line-height: 1.15 !important;
+            margin-top: 0.8mm !important;
+            text-align: center !important;
+            text-transform: uppercase !important;
+          }
+          /* Right: Recipient Details */
+          .slip-recipient-box {
+            width: 33mm !important;
+            max-width: 34mm !important;
+            padding-left: 1mm !important;
+            font-weight: 900 !important;
+            line-height: 1.12 !important;
+            flex-shrink: 0 !important;
+            overflow: hidden !important;
+          }
+          .slip-recipient-city {
+            font-size: 7pt !important;
+            font-weight: 900 !important;
+            text-transform: uppercase !important;
+          }
+          .slip-recipient-name {
+            font-size: 7pt !important;
+            font-weight: 900 !important;
+            text-transform: uppercase !important;
+            margin-top: 0.3mm !important;
+          }
+          .slip-recipient-addr {
+            font-size: 5.6pt !important;
+            font-weight: 800 !important;
+            line-height: 1.1 !important;
+            margin-top: 0.3mm !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            overflow: hidden !important;
+          }
+          .slip-recipient-pin {
+            font-size: 6.2pt !important;
+            font-weight: 900 !important;
+            margin-top: 0.3mm !important;
+          }
+          .slip-recipient-phone {
+            font-size: 6.2pt !important;
+            font-weight: 900 !important;
+            font-family: monospace !important;
+            margin-top: 0.3mm !important;
+            line-height: 1.1 !important;
+          }
+          /* Row 3: Bottom Sender Line */
+          .slip-row-sender {
+            height: 5.6mm !important;
+            min-height: 5.6mm !important;
+            max-height: 5.8mm !important;
+            padding: 0.5mm 1.5mm !important;
+            border-top: none !important;
+            border-bottom: none !important;
+            font-size: 6pt !important;
+            font-weight: 900 !important;
+            text-transform: uppercase !important;
+            line-height: 1 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-sizing: border-box !important;
+            flex-shrink: 0 !important;
+            display: flex !important;
+            align-items: center !important;
           }
         }
       `}</style>
@@ -1586,32 +2186,32 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                     {/* Diagonal Cross Line Touching Top Line and Side Line */}
                     <svg
                       className="absolute top-0 left-0 w-[54px] h-[54px] pointer-events-none select-none"
-                      viewBox="0 0 54 54"
+                      viewBox="0 0 100 100"
                     >
                       <line
                         x1="0"
-                        y1="54"
-                        x2="54"
+                        y1="100"
+                        x2="100"
                         y2="0"
                         stroke="black"
-                        strokeWidth="2"
+                        strokeWidth="2.5"
                       />
-                      <g transform="rotate(-45 27 27)">
+                      <g transform="rotate(-45 50 50)">
                         <text
-                          x="27"
-                          y="22"
+                          x="50"
+                          y="38"
                           textAnchor="middle"
                           fill="black"
                           fontWeight="900"
-                          fontSize="7"
+                          fontSize="11.5"
                           letterSpacing="0.3"
                           fontFamily="system-ui, sans-serif"
                         >
                           Insurance
                         </text>
                         <text
-                          x="27"
-                          y="35"
+                          x="50"
+                          y="64"
                           textAnchor="middle"
                           fill="black"
                           fontWeight="900"
@@ -1620,13 +2220,13 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                               effectiveCalculationTotal,
                               insurance,
                             ).length > 7
-                              ? "6"
+                              ? "10"
                               : getTriangleBadgeAmount(
                                     effectiveCalculationTotal,
                                     insurance,
                                   ).length > 5
-                                ? "7"
-                                : "8"
+                                ? "11.5"
+                                : "13"
                           }
                           letterSpacing="0.2"
                           fontFamily="ui-monospace, monospace"
@@ -1653,8 +2253,8 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                               insurance,
                             )}
                           </div>
-                          {/* Side of Round: Fine & Rate */}
-                          {qty || rate ? (
+                          {/* Side of Round: Fine & Rate (Only shown for VPP, hidden for Normal) */}
+                          {courierType === "VPP" && (qty || rate) ? (
                             <div className="text-left font-black text-black uppercase font-mono text-[9px] sm:text-[10px] leading-tight mt-[10px] shrink-0">
                               <div>FINE : {qty || 1}</div>
                               <div>AMOUNT : {rate || 0}</div>
@@ -1835,6 +2435,19 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   <option value="Unpaid">Is: Unpaid</option>
                 </select>
               )}
+
+              {/* Multi-select Print Button in Filter Bar */}
+              {selectedShipmentIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePrintSelected}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#18476A] hover:bg-[#123955] text-white text-xs font-bold transition shadow-xs cursor-pointer shrink-0 animate-in fade-in"
+                  title="Print all selected consignments"
+                >
+                  <Printer size={15} />
+                  <span>Print Selected ({selectedShipmentIds.length})</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1952,12 +2565,65 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
             </div>
           )}
 
+          {/* ── MULTI-SELECT SELECTION TOOLBAR ────────────────────────────── */}
+          {selectedShipmentIds.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-[#18476A]/10 dark:bg-cyan-950/40 border border-[#18476A]/30 dark:border-cyan-800 animate-in fade-in">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xs font-bold text-[#18476A] dark:text-cyan-300">
+                  {selectedShipmentIds.length} of {filteredShipments.length} consignment{filteredShipments.length > 1 ? "s" : ""} selected
+                </span>
+                <span className="text-slate-300 dark:text-slate-600">•</span>
+                {selectedShipmentIds.length < filteredShipments.length && (
+                  <button
+                    type="button"
+                    onClick={handleSelectAllFiltered}
+                    className="text-xs font-bold text-[#18476A] dark:text-cyan-400 hover:underline cursor-pointer"
+                  >
+                    Select all {filteredShipments.length}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="text-xs font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:underline cursor-pointer ml-1"
+                >
+                  Clear selection
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrintSelected}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#18476A] hover:bg-[#123955] text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                >
+                  <Printer size={14} />
+                  <span>Print Selected ({selectedShipmentIds.length})</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ── UNIFIED COURIER CONSIGNMENT REGISTER (NORMAL & VPP) ─────── */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-xs overflow-hidden">
             <div className="overflow-x-auto max-h-[620px] custom-scrollbar">
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="sticky top-0 z-20 bg-slate-100 dark:bg-slate-900 shadow-xs">
                   <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <th className="px-3 py-3.5 w-10 text-center whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={
+                          pagedShipments.length > 0 &&
+                          pagedShipments.every((s) =>
+                            selectedShipmentIds.includes(s._id)
+                          )
+                        }
+                        onChange={handleToggleSelectPage}
+                        className="w-4 h-4 rounded text-[#18476A] focus:ring-[#18476A] border-slate-300 dark:border-slate-600 dark:bg-slate-800 cursor-pointer"
+                        title="Select/Deselect all on this page"
+                      />
+                    </th>
                     <th className="px-4 py-3.5 w-12 text-center whitespace-nowrap">
                       #
                     </th>
@@ -2002,7 +2668,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   {loading ? (
                     <tr>
                       <td
-                        colSpan={courierTab === "VPP" ? 11 : 12}
+                        colSpan={courierTab === "VPP" ? 12 : 13}
                         className="px-4 py-12 text-center text-slate-400"
                       >
                         <div className="flex flex-col items-center justify-center gap-2">
@@ -2017,7 +2683,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   ) : filteredShipments.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={courierTab === "VPP" ? 11 : 12}
+                        colSpan={courierTab === "VPP" ? 12 : 13}
                         className="px-4 py-12 text-center text-slate-400"
                       >
                         <div className="flex flex-col items-center justify-center gap-2">
@@ -2055,11 +2721,26 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   ) : (
                     pagedShipments.map((ship, idx) => {
                       const isVpp = ship.courierType === "VPP";
+                      const isSelected = selectedShipmentIds.includes(ship._id);
                       return (
                         <tr
                           key={ship._id}
-                          className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition border-b border-slate-100 dark:border-slate-800"
+                          className={`hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition border-b border-slate-100 dark:border-slate-800 ${
+                            isSelected
+                              ? "bg-blue-50/70 dark:bg-cyan-950/25"
+                              : ""
+                          }`}
                         >
+                          {/* Multi-Select Checkbox */}
+                          <td className="px-3 py-3.5 text-center whitespace-nowrap">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectOne(ship._id)}
+                              className="w-4 h-4 rounded text-[#18476A] focus:ring-[#18476A] border-slate-300 dark:border-slate-600 dark:bg-slate-800 cursor-pointer"
+                            />
+                          </td>
+
                           {/* Row Number */}
                           <td className="px-4 py-3.5 text-center font-mono font-bold text-slate-500 whitespace-nowrap">
                             {(safeCurrentPage - 1) * pageSize + idx + 1}
@@ -2303,7 +2984,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   <tfoot className="sticky bottom-0 z-20 bg-slate-100 dark:bg-slate-900 border-t-2 border-slate-300 dark:border-slate-700 shadow-sm font-mono text-xs">
                     <tr className="font-bold text-slate-800 dark:text-slate-200">
                       <td
-                        colSpan={courierTab === "VPP" ? 6 : 7}
+                        colSpan={courierTab === "VPP" ? 7 : 8}
                         className="px-4 py-3 text-right uppercase tracking-wider text-[11px] font-black text-slate-500 dark:text-slate-400 whitespace-nowrap"
                       >
                         Total ({filteredShipments.length} consignments):
@@ -2368,216 +3049,262 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       {/* ────────────────────────────────────────────────────────────────────────
           PRINT CONSIGNMENT SLIP MODAL (EXACT MATCH OF USER IMAGE 2)
           ──────────────────────────────────────────────────────────────────────── */}
-      {printModalOpen && slipToPrint && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-2xl w-full p-6 space-y-5 max-h-[95vh] overflow-y-auto">
-            {/* Modal Controls Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <Printer
-                  size={18}
-                  className="text-[#18476A] dark:text-cyan-400"
-                />
-                <h3 className="text-base font-black text-slate-900 dark:text-white">
-                  Consignment Label Slip
-                </h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={executePrint}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#18476A] text-white text-xs font-bold hover:bg-[#123955] transition shadow-md cursor-pointer"
-                >
-                  <Printer size={14} />
-                  <span>Print Slip Now</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrintModalOpen(false)}
-                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* PRINT AREA CONTAINER */}
-            <div
-              id="print-area-wrapper"
-              className="p-4 bg-slate-100 dark:bg-slate-950/60 rounded-xl flex items-center justify-center"
-            >
-              {/* EXACT IMAGE 2 SLIP DESIGN */}
-              <div
-                id="printable-courier-slip"
-                className="w-[540px] max-w-full bg-white text-black font-sans select-text border-2 border-black rounded-lg shadow-sm overflow-hidden"
-              >
-                {/* 1. TOP ROW: IS:- UNPAID / PAID (or VPP) & SERVICE PROVIDER :- <NAME> */}
-                <div className="flex items-center justify-between p-3.5 pb-2.5 text-[14px] sm:text-[15px] font-black tracking-wide border-b-2 border-black gap-2">
-                  <div className="uppercase shrink-0 whitespace-nowrap">
-                    {slipToPrint.courierType === "VPP"
-                      ? "VPP"
-                      : `IS:- ${slipToPrint.paymentStatus?.toUpperCase() || "UNPAID"}`}
-                  </div>
-                  <div className="uppercase tracking-wide text-right shrink-0 whitespace-nowrap">
-                    SERVICE PROVIDER :-{" "}
-                    {slipToPrint.serviceProvider || "JAY AMBE LOGISTIC"}
+      {printModalOpen && (slipsToPrint.length > 0 || slipToPrint) && (() => {
+        const effectiveSlips = slipsToPrint.length > 0 ? slipsToPrint : slipToPrint ? [slipToPrint] : [];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-3xl w-full p-6 space-y-5 max-h-[95vh] overflow-y-auto">
+              {/* Modal Controls Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Printer
+                    size={18}
+                    className="text-[#18476A] dark:text-cyan-400"
+                  />
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>
+                        {effectiveSlips.length > 1
+                          ? `Print ${effectiveSlips.length} Consignment Labels`
+                          : "Consignment Label Slip"}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-[#18476A]/10 text-[#18476A] dark:bg-cyan-500/10 dark:text-cyan-300 text-[11px] font-mono font-bold">
+                        75mm × 50mm
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Standard Thermal Sticker Roll (75mm × 50mm / 3″ × 2″)
+                    </p>
                   </div>
                 </div>
-
-                {/* 2. MIDDLE ROW */}
-                <div className="py-4 px-3.5 relative flex items-center justify-between min-h-[145px] border-b-2 border-black">
-                  {/* Left: Diagonal Cross Line Touching Top Divider and Side Border */}
-                  <svg
-                    className="absolute top-0 left-0 w-[88px] h-[88px] pointer-events-none select-none"
-                    viewBox="0 0 88 88"
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={executePrint}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#18476A] text-white text-xs font-bold hover:bg-[#123955] transition shadow-md cursor-pointer"
                   >
-                    <line
-                      x1="0"
-                      y1="88"
-                      x2="88"
-                      y2="0"
-                      stroke="black"
-                      strokeWidth="2.5"
-                    />
-                    <g transform="rotate(-45 44 44)">
-                      <text
-                        x="44"
-                        y="37"
-                        textAnchor="middle"
-                        fill="black"
-                        fontWeight="900"
-                        fontSize="11.5"
-                        letterSpacing="0.4"
-                        fontFamily="system-ui, sans-serif"
-                      >
-                        Insurance
-                      </text>
-                      <text
-                        x="44"
-                        y="57"
-                        textAnchor="middle"
-                        fill="black"
-                        fontWeight="900"
-                        fontSize={
-                          getTriangleBadgeAmount(
-                            getShipmentValuation(slipToPrint),
-                            slipToPrint.insurance,
-                          ).length > 7
-                            ? "10.5"
-                            : getTriangleBadgeAmount(
-                                  getShipmentValuation(slipToPrint),
-                                  slipToPrint.insurance,
-                                ).length > 5
-                              ? "12"
-                              : "13.5"
-                        }
-                        letterSpacing="0.3"
-                        fontFamily="ui-monospace, monospace"
-                      >
-                        {getTriangleBadgeAmount(
-                          getShipmentValuation(slipToPrint),
-                          slipToPrint.insurance,
-                        )}
-                      </text>
-                    </g>
-                  </svg>
-                  <div className="w-[88px] shrink-0" />
-
-                  {/* Middle Section: Oval & Side of Round (Fine & Rate) */}
-                  <div className="flex items-center gap-3.5 shrink-0">
-                    {isShipmentOver1Lakh(
-                      getShipmentValuation(slipToPrint),
-                      slipToPrint.insurance,
-                    ) && (
-                      <div className=" items-center justify-center shrink-0">
-                        <div className="border-2 border-black rounded-[50%/50%] px-4 py-2 min-w-[105px] text-center shadow-xs">
-                          <span className="text-xl font-black tracking-wider font-mono">
-                            {getRateInsuranceCode(
-                              getShipmentValuation(slipToPrint),
-                              slipToPrint.insurance,
-                            )}
-                          </span>
-                        </div>
-                        {/* Beside Round Oval: Fine & Rate */}
-                        {slipToPrint.qty || slipToPrint.rate ? (
-                          <div className="text-left font-black text-black uppercase font-mono text-[13px] sm:text-[14px] leading-tight mt-[10px] tracking-wider shrink-0">
-                            <div>FINE : {slipToPrint.qty || 1}</div>
-                            <div>AMOUNT : {slipToPrint.rate || 0}</div>
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Spacer pushing recipient to right */}
-                  <div className="flex-1" />
-
-                  {/* Right: Recipient Details shifted right */}
-                  <div className="text-left pl-2 pr-1 w-[240px] max-w-[260px] text-[13px] sm:text-[14px] font-black text-black leading-snug shrink-0">
-                    <div className="uppercase tracking-wide font-black text-black">
-                      TO :- {slipToPrint.destinationCity || "DELHI"}
-                    </div>
-                    <div className="uppercase mt-1 text-black font-black">
-                      {slipToPrint.customerName || "RECIPIENT"}
-                    </div>
-                    {slipToPrint.destinationAddress && (
-                      <div className="text-[13px] sm:text-[14px] font-black text-black mt-1 leading-tight break-words">
-                        {slipToPrint.destinationAddress}
-                      </div>
-                    )}
-                    {slipToPrint.destinationPincode && (
-                      <div className="text-[13px] sm:text-[14px] font-black text-black leading-tight">
-                        PIN - {slipToPrint.destinationPincode}
-                      </div>
-                    )}
-                    {/* Phone Numbers - display both if available, bold with dot */}
-                    <div className="mt-1 font-mono font-black text-black tracking-wider text-[13px] sm:text-[14px] leading-tight space-y-0.5">
-                      {getShipmentPhones(
-                        slipToPrint.customerPhone,
-                        slipToPrint.customerPhone2,
-                        slipToPrint.customerName,
-                        slipToPrint.customerCode,
-                        customers,
-                      ).length > 0 ? (
-                        getShipmentPhones(
-                          slipToPrint.customerPhone,
-                          slipToPrint.customerPhone2,
-                          slipToPrint.customerName,
-                          slipToPrint.customerCode,
-                          customers,
-                        ).map((ph, idx) => <div key={idx}>{ph}.</div>)
-                      ) : (
-                        <div>—</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3. SENDER ROW: From :- S G SURAT 9601511329 - 7405415105 */}
-                <div className="py-2.5 px-3.5 text-[14px] sm:text-[15px] font-black text-black uppercase tracking-wide border-b border-black">
-                  {slipToPrint.fromSender ||
-                    "From :- S G SURAT 9601511329 - 7405415105"}
+                    <Printer size={14} />
+                    <span>
+                      {effectiveSlips.length > 1
+                        ? `Print All ${effectiveSlips.length} Labels (75×50)`
+                        : "Print Label (75×50)"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPrintModalOpen(false);
+                      setSlipsToPrint([]);
+                      setSlipToPrint(null);
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
               </div>
-            </div>
 
-            {/* Modal Bottom Actions */}
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-400">
-                Print layout is styled exactly to fit standard label & A4
-                thermal/laser printers.
-              </span>
-              <button
-                type="button"
-                onClick={() => setPrintModalOpen(false)}
-                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+              {/* PRINT AREA CONTAINER */}
+              <div
+                id="print-area-wrapper"
+                className="p-4 bg-slate-100 dark:bg-slate-950/60 rounded-xl space-y-6 flex flex-col items-center justify-center"
               >
-                Close Preview
-              </button>
+                {effectiveSlips.map((slip, idx) => (
+                  <div
+                    key={slip._id || idx}
+                    className="print-slip-item w-full flex flex-col items-center"
+                  >
+                    {effectiveSlips.length > 1 && (
+                      <div className="print-preview-badge mb-2 text-[11px] font-bold text-slate-500 dark:text-slate-400 self-start max-w-[450px] mx-auto w-full flex justify-between items-center px-1">
+                        <span>
+                          Label {idx + 1} of {effectiveSlips.length} • {slip.awbNumber}
+                        </span>
+                        <span className="font-mono text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
+                          {slip.courierType || "Normal"} • {slip.customerName}
+                        </span>
+                      </div>
+                    )}
+
+                    <div
+                      id={idx === 0 ? "printable-courier-slip" : undefined}
+                      className="printable-courier-slip w-[450px] max-w-full aspect-[75/50] bg-white text-black font-sans select-text border-2 border-black rounded-sm shadow-sm overflow-hidden flex flex-col justify-between"
+                    >
+                      {/* 1. TOP ROW: IS:- UNPAID / PAID (or VPP) & SERVICE PROVIDER */}
+                      <div className="slip-row-top flex items-center justify-between px-3 py-1.5 text-[12px] font-black tracking-wide border-b-2 border-black gap-2 shrink-0">
+                        <div className="uppercase shrink-0 whitespace-nowrap">
+                          {slip.courierType === "VPP"
+                            ? "VPP"
+                            : `IS:- ${slip.paymentStatus?.toUpperCase() || "UNPAID"}`}
+                        </div>
+                        <div className="uppercase tracking-wide text-right shrink-0 whitespace-nowrap">
+                          SERVICE PROVIDER :-{" "}
+                          {slip.serviceProvider || "JAY AMBE LOGISTIC"}
+                        </div>
+                      </div>
+
+                      {/* 2. MIDDLE ROW */}
+                      <div className="slip-row-middle py-2 px-2.5 relative flex-1 flex items-center justify-between border-b-2 border-black min-h-[140px] overflow-hidden">
+                        {/* Left: Diagonal Cross Line Touching Top Divider and Side Border */}
+                        <svg
+                          className="slip-triangle-svg absolute top-0 left-0 w-[74px] h-[74px] pointer-events-none select-none"
+                          viewBox="0 0 100 100"
+                        >
+                          <line
+                            x1="0"
+                            y1="100"
+                            x2="100"
+                            y2="0"
+                            stroke="black"
+                            strokeWidth="2.5"
+                          />
+                          <g transform="rotate(-45 50 50)">
+                            <text
+                              x="50"
+                              y="38"
+                              textAnchor="middle"
+                              fill="black"
+                              fontWeight="900"
+                              fontSize="11.5"
+                              letterSpacing="0.4"
+                              fontFamily="system-ui, -apple-system, sans-serif"
+                            >
+                              Insurance
+                            </text>
+                            <text
+                              x="50"
+                              y="64"
+                              textAnchor="middle"
+                              fill="black"
+                              fontWeight="900"
+                              fontSize={
+                                getTriangleBadgeAmount(
+                                  getShipmentValuation(slip),
+                                  slip.insurance,
+                                ).length > 7
+                                  ? "10"
+                                  : getTriangleBadgeAmount(
+                                        getShipmentValuation(slip),
+                                        slip.insurance,
+                                      ).length > 5
+                                    ? "11.5"
+                                    : "13"
+                              }
+                              letterSpacing="0.3"
+                              fontFamily="ui-monospace, monospace"
+                            >
+                              {getTriangleBadgeAmount(
+                                getShipmentValuation(slip),
+                                slip.insurance,
+                              )}
+                            </text>
+                          </g>
+                        </svg>
+                        <div className="slip-triangle-spacer w-[74px] shrink-0" />
+
+                        {/* Middle Section: Oval & Side of Round (Fine & Rate) */}
+                        <div className="slip-center-oval flex flex-col items-center justify-center shrink-0">
+                          {isShipmentOver1Lakh(
+                            getShipmentValuation(slip),
+                            slip.insurance,
+                          ) && (
+                            <div className="slip-oval-badge border-2 border-black rounded-[50%/50%] px-3 py-1 min-w-[78px] text-center shadow-xs">
+                              <span className="text-base font-black tracking-wider font-mono">
+                                {getRateInsuranceCode(
+                                  getShipmentValuation(slip),
+                                  slip.insurance,
+                                )}
+                              </span>
+                            </div>
+                          )}
+                          {/* Beside Round Oval: Fine & Rate (Only shown for VPP, hidden for Normal) */}
+                          {slip.courierType === "VPP" &&
+                          (slip.qty || slip.rate) ? (
+                            <div className="slip-fine-rate-block text-center font-black text-black uppercase font-mono text-[10px] leading-tight mt-1 tracking-wider shrink-0">
+                              <div>FINE : {slip.qty || 1}</div>
+                              <div>AMOUNT : {slip.rate || 0}</div>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {/* Spacer pushing recipient to right */}
+                        <div className="flex-1" />
+
+                        {/* Right: Recipient Details shifted right */}
+                        <div className="slip-recipient-box text-left pl-2 pr-1 w-[195px] max-w-[205px] text-[11px] font-black text-black leading-tight shrink-0 overflow-hidden">
+                          <div className="slip-recipient-city uppercase tracking-wide font-black text-black">
+                            TO :- {slip.destinationCity || "DELHI"}
+                          </div>
+                          <div className="slip-recipient-name uppercase mt-0.5 text-black font-black truncate">
+                            {slip.customerName || "RECIPIENT"}
+                          </div>
+                          {slip.destinationAddress && (
+                            <div className="slip-recipient-addr text-[10px] font-black text-black mt-0.5 leading-tight break-words line-clamp-2">
+                              {slip.destinationAddress}
+                            </div>
+                          )}
+                          {slip.destinationPincode && (
+                            <div className="slip-recipient-pin text-[10.5px] font-black text-black leading-tight mt-0.5">
+                              PIN - {slip.destinationPincode}
+                            </div>
+                          )}
+                          {/* Phone Numbers - display both if available, bold with dot */}
+                          <div className="slip-recipient-phone mt-0.5 font-mono font-black text-black tracking-tight text-[10.5px] leading-tight space-y-0.5">
+                            {getShipmentPhones(
+                              slip.customerPhone,
+                              slip.customerPhone2,
+                              slip.customerName,
+                              slip.customerCode,
+                              customers,
+                            ).length > 0 ? (
+                              getShipmentPhones(
+                                slip.customerPhone,
+                                slip.customerPhone2,
+                                slip.customerName,
+                                slip.customerCode,
+                                customers,
+                              ).map((ph, phIdx) => (
+                                <div key={phIdx}>{ph}.</div>
+                              ))
+                            ) : (
+                              <div>—</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3. SENDER ROW: From :- S G SURAT 9601511329 - 7405415105 */}
+                      <div className="slip-row-sender py-1.5 px-3 text-[11px] font-black text-black uppercase tracking-wide border-t border-black truncate shrink-0">
+                        {slip.fromSender ||
+                          "From :- S G SURAT 9601511329 - 7405415105"}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Modal Bottom Actions */}
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs text-slate-400">
+                  {effectiveSlips.length > 1
+                    ? `${effectiveSlips.length} slips configured for 75mm × 50mm thermal sticker roll printers with 1 label per page.`
+                    : "Print layout configured for standard 75mm × 50mm (3″ × 2″) thermal sticker label rolls."}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrintModalOpen(false);
+                    setSlipsToPrint([]);
+                    setSlipToPrint(null);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Close Preview
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ────────────────────────────────────────────────────────────────────────
           EDIT MODAL
