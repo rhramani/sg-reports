@@ -6,44 +6,33 @@ import { logActivity } from "../utils/auditLogger";
 
 export const rolesRouter = Router();
 
-const DEFAULT_MODULES = [
+export const DEFAULT_MODULES = [
   "Dashboard",
   "Reports",
   "Approvals",
   "Jewellery Transaction",
   "Category",
-  "Users",
-  "Roles",
-  "Permissions",
-  "Report types",
+  "Jewellery Transaction Master",
   "Customer Tab",
   "Rate Master",
   "Service Provider",
   "Create Courier",
+  "Users",
+  "Roles",
+  "Permissions",
+  "Activity Log",
 ];
 
 export function getDefaultModulePermissions(roleName: string): IModulePermission[] {
   const cleanRole = (roleName || "").trim().toLowerCase();
-  const isSuperAdmin = cleanRole === "super admin";
+  const isSuperAdmin = cleanRole === "super admin" || cleanRole === "superadmin";
   const isAdmin = isSuperAdmin || cleanRole.includes("admin") || cleanRole === "administrator";
   const isSupervisor = cleanRole.includes("supervisor") || cleanRole.includes("manager");
   const isAnalyst = cleanRole.includes("analyst") || cleanRole.includes("operator") || cleanRole.includes("user");
+  const isViewer = cleanRole.includes("viewer") || cleanRole.includes("guest");
 
   return DEFAULT_MODULES.map((mod) => {
-    // The Permissions and Roles management tabs are reserved for Admins and Super Admins
-    if (mod === "Permissions") {
-      return {
-        module: mod,
-        actions: {
-          view: isAdmin,
-          add: isAdmin,
-          update: isAdmin,
-          delete: isAdmin,
-          export: isAdmin,
-        },
-      };
-    }
-
+    // Super Admin & Admin have access to all modules
     if (isAdmin) {
       return {
         module: mod,
@@ -51,23 +40,27 @@ export function getDefaultModulePermissions(roleName: string): IModulePermission
       };
     }
 
+    // Administration modules are strictly reserved for Admins by default
+    const isAdminModule =
+      mod === "Users" ||
+      mod === "Roles" ||
+      mod === "Permissions" ||
+      mod === "Activity Log";
+
+    if (isAdminModule) {
+      return {
+        module: mod,
+        actions: { view: false, add: false, update: false, delete: false, export: false },
+      };
+    }
+
     if (isSupervisor) {
-      const isAllowed =
-        mod === "Approvals" ||
-        mod === "Reports" ||
-        mod === "Dashboard" ||
-        mod === "Jewellery Transaction" ||
-        mod === "Category" ||
-        mod === "Customer Tab" ||
-        mod === "Rate Master" ||
-        mod === "Service Provider" ||
-        mod === "Create Courier";
       return {
         module: mod,
         actions: {
           view: true,
-          add: isAllowed,
-          update: isAllowed,
+          add: true,
+          update: true,
           delete: false,
           export: true,
         },
@@ -75,33 +68,62 @@ export function getDefaultModulePermissions(roleName: string): IModulePermission
     }
 
     if (isAnalyst) {
-      const isAllowed =
-        mod === "Reports" ||
-        mod === "Dashboard" ||
-        mod === "Approvals" ||
-        mod === "Jewellery Transaction" ||
-        mod === "Category" ||
-        mod === "Customer Tab" ||
-        mod === "Rate Master" ||
-        mod === "Service Provider" ||
-        mod === "Create Courier";
+      const canAddUpdate = mod !== "Approvals";
       return {
         module: mod,
         actions: {
           view: true,
-          add: isAllowed,
-          update: isAllowed,
+          add: canAddUpdate,
+          update: canAddUpdate,
           delete: false,
           export: true,
         },
       };
     }
 
-    // Default Viewer / standard fallback
+    if (isViewer) {
+      const canView = mod === "Dashboard" || mod === "Reports" || mod === "Jewellery Transaction";
+      return {
+        module: mod,
+        actions: { view: canView, add: false, update: false, delete: false, export: false },
+      };
+    }
+
+    // Default fallback for any other role
     return {
       module: mod,
-      actions: { view: true, add: false, update: false, delete: false, export: false },
+      actions: { view: false, add: false, update: false, delete: false, export: false },
     };
+  });
+}
+
+export function mergeRolePermissionsWithDefaults(
+  roleName: string,
+  existingPerms?: IModulePermission[]
+): IModulePermission[] {
+  const defaults = getDefaultModulePermissions(roleName);
+  if (!existingPerms || !Array.isArray(existingPerms) || existingPerms.length === 0) {
+    return defaults;
+  }
+  const existingMap = new Map<string, IModulePermission["actions"]>();
+  existingPerms.forEach((p) => {
+    if (p.module && p.actions) {
+      existingMap.set(p.module.trim().toLowerCase(), p.actions);
+    }
+  });
+
+  return DEFAULT_MODULES.map((mod) => {
+    const existing = existingMap.get(mod.trim().toLowerCase());
+    if (existing) {
+      return { module: mod, actions: existing };
+    }
+    const defaultForMod = defaults.find((d) => d.module.trim().toLowerCase() === mod.trim().toLowerCase());
+    return (
+      defaultForMod || {
+        module: mod,
+        actions: { view: false, add: false, update: false, delete: false, export: false },
+      }
+    );
   });
 }
 
@@ -116,13 +138,11 @@ rolesRouter.get("/", async (_req, res) => {
       });
     }
     const roles = await RoleModel.find().sort({ createdAt: -1 });
-    
+
     // Ensure every role has populated modulePermissions
     const populated = roles.map((r) => {
       const doc = r.toObject();
-      if (!doc.modulePermissions || doc.modulePermissions.length === 0) {
-        doc.modulePermissions = getDefaultModulePermissions(doc.role);
-      }
+      doc.modulePermissions = mergeRolePermissionsWithDefaults(doc.role, doc.modulePermissions);
       return doc;
     });
 
@@ -149,10 +169,10 @@ rolesRouter.get("/:id/permissions", async (req, res) => {
       return res.status(404).json({ success: false, error: "Role not found." });
     }
 
-    const modulePermissions =
-      role.modulePermissions && role.modulePermissions.length > 0
-        ? role.modulePermissions
-        : getDefaultModulePermissions(role.role);
+    const modulePermissions = mergeRolePermissionsWithDefaults(
+      role.role,
+      role.modulePermissions
+    );
 
     res.json({
       success: true,

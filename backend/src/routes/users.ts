@@ -142,10 +142,11 @@ usersRouter.put(
   authorizeRoles("Super Admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { name, email, role } = req.body as {
+      const { name, email, role, password } = req.body as {
         name?: string;
         email?: string;
         role?: string;
+        password?: string;
       };
 
       if (!name || !name.trim()) {
@@ -153,6 +154,9 @@ usersRouter.put(
       }
       if (!email || !email.trim()) {
         return res.status(400).json({ success: false, error: "Email address is required." });
+      }
+      if (password && password.trim().length > 0 && password.trim().length < 8) {
+        return res.status(400).json({ success: false, error: "Password must be at least 8 characters." });
       }
 
       const cleanEmail = email.trim().toLowerCase();
@@ -181,9 +185,19 @@ usersRouter.put(
         return res.status(409).json({ success: false, error: "Another user with this email already exists." });
       }
 
+      const updateData: Record<string, any> = {
+        name: trimmedName,
+        email: cleanEmail,
+        role: role?.trim() || "Report Analyst",
+      };
+
+      if (password && password.trim().length >= 8) {
+        updateData.password = await bcrypt.hash(password.trim(), 12);
+      }
+
       const updated = await UserModel.findByIdAndUpdate(
         req.params.id,
-        { name: trimmedName, email: cleanEmail, role: role?.trim() || "Report Analyst" },
+        updateData,
         { new: true }
       ).select("-password");
 

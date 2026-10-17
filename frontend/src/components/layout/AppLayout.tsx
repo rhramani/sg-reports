@@ -276,52 +276,83 @@ export function AppLayout({ children }: AppLayoutProps) {
     if (moduleName === "Profile") {
       return { view: true, add: true, update: true, delete: false, export: false };
     }
-    const isSuperOrAdmin =
-      userRole === "Super Admin" ||
-      userRole === "Administrator" ||
-      userRole === "Admin" ||
-      userRole.toLowerCase().includes("admin");
 
-    if (moduleName === "Permissions" || moduleName === "Activity Log") {
-      return {
-        view: isSuperOrAdmin,
-        add: isSuperOrAdmin,
-        update: isSuperOrAdmin,
-        delete: isSuperOrAdmin,
-        export: isSuperOrAdmin,
-      };
-    }
-    if (isSuperOrAdmin) {
+    const cleanRole = (userRole || "").trim().toLowerCase();
+    const isSuperAdmin =
+      cleanRole === "super admin" || cleanRole === "superadmin";
+
+    // Super Admin has full unrestricted access across all modules
+    if (isSuperAdmin) {
       return { view: true, add: true, update: true, delete: true, export: true };
     }
 
-    const matchKey = Object.keys(userPermissions).find(
-      (k) => k.trim().toLowerCase() === moduleName.trim().toLowerCase(),
+    const normalizedName = moduleName.trim().toLowerCase();
+
+    // 1. Direct match in userPermissions (derived from role's modulePermissions in MongoDB)
+    const directKey = Object.keys(userPermissions).find(
+      (k) => k.trim().toLowerCase() === normalizedName
     );
-    if (matchKey && userPermissions[matchKey]) {
-      return userPermissions[matchKey];
+    if (directKey && userPermissions[directKey]) {
+      return userPermissions[directKey];
     }
 
-    const isStandardWorkspaceModule =
-      moduleName === "Dashboard" ||
-      moduleName === "Reports" ||
-      moduleName === "Sales Report" ||
-      moduleName === "Approvals" ||
-      moduleName === "Jewellery Transaction" ||
-      moduleName === "Jewellery Transaction Master" ||
-      moduleName === "Jewellery Transaction Excel Sheet" ||
-      moduleName === "Jewellery Transaction Report" ||
-      moduleName === "Category" ||
-      moduleName === "Category Master" ||
-      moduleName === "Customer Tab" ||
-      moduleName === "Rate Master" ||
-      moduleName === "Service Provider" ||
-      moduleName === "Create Courier" ||
-      moduleName === "Courier";
-
-    if (isStandardWorkspaceModule) {
-      return { view: true, add: true, update: true, delete: false, export: true };
+    // 2. Cross-module aliases and related fallbacks
+    // Jewellery Transaction / Jewellery Transaction Master / Sales Report
+    if (normalizedName.includes("jewellery transaction") || normalizedName === "sales report") {
+      const match = Object.keys(userPermissions).find((k) => {
+        const lower = k.trim().toLowerCase();
+        return (
+          lower === "jewellery transaction" ||
+          lower === "jewellery transaction master" ||
+          lower === "sales report"
+        );
+      });
+      if (match && userPermissions[match]) {
+        return userPermissions[match];
+      }
     }
+
+    // Category / Category Master
+    if (normalizedName.includes("category")) {
+      const match = Object.keys(userPermissions).find((k) =>
+        k.trim().toLowerCase().includes("category")
+      );
+      if (match && userPermissions[match]) {
+        return userPermissions[match];
+      }
+    }
+
+    // Activity Log / Audit Logs
+    if (normalizedName.includes("activity log") || normalizedName.includes("audit")) {
+      const match = Object.keys(userPermissions).find((k) => {
+        const lower = k.trim().toLowerCase();
+        return lower === "activity log" || lower.includes("audit");
+      });
+      if (match && userPermissions[match]) {
+        return userPermissions[match];
+      }
+    }
+
+    // Courier parent / child fallback
+    if (normalizedName === "courier") {
+      const match = Object.keys(userPermissions).find((k) =>
+        k.trim().toLowerCase().includes("courier")
+      );
+      if (match && userPermissions[match]) {
+        return userPermissions[match];
+      }
+    }
+
+    // 3. Admin / Administrator fallback (only if not explicitly customized)
+    const isAdmin =
+      cleanRole === "administrator" ||
+      cleanRole === "admin" ||
+      cleanRole.includes("admin");
+    if (isAdmin) {
+      return { view: true, add: true, update: true, delete: true, export: true };
+    }
+
+    // 4. Default: No access
     return { view: false, add: false, update: false, delete: false, export: false };
   };
 
@@ -380,9 +411,8 @@ export function AppLayout({ children }: AppLayoutProps) {
     if (
       Object.keys(userPermissions).length > 0 &&
       allPermittedModules.length > 0 &&
-      !allPermittedModules.includes(activeNav) &&
       activeNav !== "Profile" &&
-      activeNav !== "Activity Log"
+      !allPermittedModules.includes(activeNav)
     ) {
       navigateToModule(allPermittedModules[0], true);
     }
@@ -514,8 +544,8 @@ export function AppLayout({ children }: AppLayoutProps) {
             })}
           </div>
 
-          <div className="mt-auto p-4 border-t border-white/10">
-            {getPermissionsForModule("Activity Log").view && (
+          {getPermissionsForModule("Activity Log").view && (
+            <div className="mt-auto p-4 border-t border-white/10">
               <button
                 type="button"
                 data-active-nav={activeNav === "Activity Log" ? "true" : undefined}
@@ -545,8 +575,8 @@ export function AppLayout({ children }: AppLayoutProps) {
                   Audit Logs
                 </span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </aside>
 
         {/* ── Main content ── */}

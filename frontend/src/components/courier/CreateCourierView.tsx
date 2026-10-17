@@ -124,7 +124,13 @@ const getTriangleBadgeAmount = (
 
 /**
  * Calculates Total Amount (or Rate) (₹) - Insurance (₹) and returns the rounded figure.
- * Manages round figure: e.g. 111 to 119 -> 120, 289 -> 290 (round up to next 10).
+ * Digit rules based on Net Amount (diff = Total/Valuation - Insurance):
+ * - <= 10,00,000 (up to 10 Lakhs, e.g. 80,000, 1,00,000, 1,77,500): 3 digits (e.g. 180)
+ * - > 10,00,000 to <= 1,00,00,000 (more than 10 Lakhs till 1 Crore): 4 digits (e.g. 1800)
+ * - > 1,00,00,000 to <= 10,00,00,000 (more than 1 Crore till 10 Crore): 5 digits (e.g. 18000)
+ * - > 10,00,00,000 (more than 10 Crore): adds +1 digit for each scale (starts at 6 digits)
+ *
+ * Manages round figure: e.g. 111 to 119 -> 120, 289 -> 290, 1775 -> 1780 (round up to next 10).
  * If amount/rate is not entered or 0, returns "----" matching the reference design.
  */
 const getRateInsuranceCode = (
@@ -137,13 +143,32 @@ const getRateInsuranceCode = (
   const diff = r - ins;
   if (diff <= 0) return "000";
 
-  // Extract raw 3-digit figure
+  // Determine target digit count based on slab:
+  // Up to 10,00,000 (10 Lakhs): 3 digits
+  // > 10,00,000 to 1,00,00,000 (1 Crore): 4 digits
+  // > 1,00,00,000 to 10,00,00,000 (10 Crore): 5 digits
+  // Each next 10x scale adds 1 more digit
+  let targetDigits = 3;
+  if (diff <= 1000000) {
+    targetDigits = 3;
+  } else if (diff <= 10000000) {
+    targetDigits = 4;
+  } else if (diff <= 100000000) {
+    targetDigits = 5;
+  } else {
+    const powerOfTen = Math.floor(Math.log10(diff));
+    targetDigits = 5 + Math.max(1, powerOfTen - 7);
+  }
+
+  // Extract raw digits
   const digits = Math.round(diff).toString().replace(/\D/g, "");
   const baseStr =
-    digits.length >= 3 ? digits.slice(0, 3) : digits.padEnd(3, "0");
+    digits.length >= targetDigits
+      ? digits.slice(0, targetDigits)
+      : digits.padEnd(targetDigits, "0");
   const baseNum = parseInt(baseStr, 10) || 0;
 
-  // Manage round figure: 111 to 119 -> 120, 289 -> 290 (round up to next 10)
+  // Manage round figure: round up to next 10 (e.g. 111 to 119 -> 120, 1775 -> 1780)
   const rounded = Math.ceil(baseNum / 10) * 10;
   return rounded.toString();
 };
@@ -2143,7 +2168,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                           effectiveCalculationTotal,
                           insurance,
                         )
-                          ? "First 3 Digits in Circle (Net ≥ ₹1,00,000)"
+                          ? "Token Code in Circle (Net ≥ ₹1,00,000)"
                           : "Net amount shows in triangle; circle hidden for Net < ₹1,00,000"}
                       </div>
                     </div>
@@ -3780,7 +3805,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                         getShipmentValuation(editingShipment),
                         editingShipment.insurance,
                       )
-                        ? "First 3 Digits Token (Net ≥ ₹1,00,000)"
+                        ? "Token Code in Circle (Net ≥ ₹1,00,000)"
                         : "Net amount shows in triangle; no round circle"}
                     </div>
                   </div>

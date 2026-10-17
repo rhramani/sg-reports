@@ -32,9 +32,8 @@ export default defineConfig({
     // Forward all /api/* requests to the standalone Express backend (dynamically targets whichever port backend bound to)
     proxy: {
       "/api": {
-        target: "http://localhost:3000",
+        target: getBackendTarget(),
         changeOrigin: true,
-        router: () => getBackendTarget(),
       },
     },
   },

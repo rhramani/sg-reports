@@ -24,6 +24,8 @@ import {
   DollarSign,
   Truck,
   PackagePlus,
+  Clock3,
+  FileSpreadsheet,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { authFetch } from "@/lib/apiClient";
@@ -47,15 +49,17 @@ const DEFAULT_MODULE_DEFINITIONS = [
   { name: "Dashboard", icon: LayoutDashboard, category: "Checking report", description: "Main workspace metrics and status overview" },
   { name: "Reports", icon: FileBarChart, category: "Checking report", description: "Report datasets, file uploads, and dynamic viewer" },
   { name: "Approvals", icon: ClipboardCheck, category: "Checking report", description: "Workflow approvals and row status queue" },
-  { name: "Jewellery Transaction", icon: Coins, category: "Jewellery Transaction", description: "Jewellery transactions, excel uploads, days analysis, and dynamic report viewer" },
+  { name: "Jewellery Transaction", icon: Coins, category: "Jewellery Transaction", description: "Jewellery transactions and sales report analytics" },
   { name: "Category", icon: FolderKanban, category: "Master", description: "Jewellery product lines, metals, and category master records" },
-  { name: "Users", icon: Users, category: "Administration", description: "Workspace members, roles, and invitations" },
-  { name: "Roles", icon: Shield, category: "Administration", description: "Workspace role hierarchy and member assignments" },
-  { name: "Permissions", icon: ShieldCheck, category: "Administration", description: "Granular action permissions per role & module" },
+  { name: "Jewellery Transaction Master", icon: FileSpreadsheet, category: "Master", description: "Jewellery Transaction Excel Sheet and ledger master" },
   { name: "Customer Tab", icon: Contact2, category: "Courier", description: "Courier customers, delivery addresses, and contact directory" },
   { name: "Rate Master", icon: DollarSign, category: "Courier", description: "Courier freight rate master, zone slabs, and fuel surcharges" },
   { name: "Service Provider", icon: Truck, category: "Courier", description: "Logistics carrier partners, tracking URLs, and accounts" },
   { name: "Create Courier", icon: PackagePlus, category: "Courier", description: "Consignment booking, waybill slip generation, and dispatch register" },
+  { name: "Users", icon: Users, category: "Administration", description: "Workspace members, roles, and invitations" },
+  { name: "Roles", icon: Shield, category: "Administration", description: "Workspace role hierarchy and member assignments" },
+  { name: "Permissions", icon: ShieldCheck, category: "Administration", description: "Granular action permissions per role & module" },
+  { name: "Activity Log", icon: Clock3, category: "Administration", description: "System audit trail, security events, and user activity history" },
 ];
 
 const ACTION_COLUMNS: { key: keyof PermissionActions; label: string; icon: typeof Eye }[] = [

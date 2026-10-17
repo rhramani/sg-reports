@@ -59,6 +59,8 @@ function UsersContent() {
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editRole, setEditRole] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [showEditPassword, setShowEditPassword] = useState(false);
   const [editError, setEditError] = useState("");
   const [editLoading, setEditLoading] = useState(false);
 
@@ -217,6 +219,8 @@ function UsersContent() {
     setEditName(user.name);
     setEditEmail(user.email);
     setEditRole(user.role);
+    setEditPassword("");
+    setShowEditPassword(false);
     setEditError("");
     setShowEdit(true);
     setOpenMenuIndex(null);
@@ -231,6 +235,11 @@ function UsersContent() {
       return;
     }
 
+    if (editPassword.trim() && editPassword.trim().length < 8) {
+      setEditError("New password must be at least 8 characters.");
+      return;
+    }
+
     setEditError("");
     setEditLoading(true);
     try {
@@ -241,6 +250,7 @@ function UsersContent() {
           name: editName,
           email: editEmail,
           role: editRole,
+          ...(editPassword.trim() ? { password: editPassword.trim() } : {}),
         }),
       });
       const data = await res.json();
@@ -707,6 +717,31 @@ function UsersContent() {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  New Password <span className="text-[10px] text-slate-400 font-normal">(leave blank to keep current)</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showEditPassword ? "text" : "password"}
+                    placeholder="Enter new password (min. 8 characters)"
+                    value={editPassword}
+                    onChange={(e) => {
+                      setEditPassword(e.target.value);
+                      setEditError("");
+                    }}
+                    className="h-10 w-full rounded-lg border border-slate-200 px-3 pr-10 text-sm outline-none focus:border-[#6fa6c4] focus:ring-2 focus:ring-[#dbeaf2]"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowEditPassword(!showEditPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showEditPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
 
               {editError && (

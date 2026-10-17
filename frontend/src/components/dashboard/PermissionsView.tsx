@@ -18,6 +18,7 @@ import {
   Edit3,
   Trash2,
   Download,
+  Clock3,
   ChevronRight,
   Coins,
   FolderKanban,
@@ -56,13 +57,15 @@ const DEFAULT_MODULE_DEFINITIONS = [
   { name: "Approvals", icon: ClipboardCheck, category: "Checking report", description: "Workflow approvals and row status queue" },
   { name: "Jewellery Transaction", icon: Coins, category: "Jewellery Transaction", description: "Jewellery sales, purchases, exchanges and bullion ledger" },
   { name: "Category", icon: FolderKanban, category: "Master", description: "Jewellery product lines, metals, and HSN codes" },
-  { name: "Users", icon: Users, category: "Administration", description: "Workspace members, roles, and invitations" },
-  { name: "Roles", icon: Shield, category: "Administration", description: "Workspace role hierarchy and member assignments" },
-  { name: "Permissions", icon: ShieldCheck, category: "Administration", description: "Granular action permissions per role & module" },
+  { name: "Jewellery Transaction Master", icon: FileSpreadsheet, category: "Master", description: "Jewellery Transaction Excel Sheet and ledger master" },
   { name: "Customer Tab", icon: Contact2, category: "Courier", description: "Courier customers, delivery addresses, and contact directory" },
   { name: "Rate Master", icon: DollarSign, category: "Courier", description: "Courier freight rate master, zone slabs, and fuel surcharges" },
   { name: "Service Provider", icon: Truck, category: "Courier", description: "Logistics carrier partners, tracking URLs, and accounts" },
   { name: "Create Courier", icon: PackagePlus, category: "Courier", description: "Consignment booking, waybill slip generation, and dispatch register" },
+  { name: "Users", icon: Users, category: "Administration", description: "Workspace members, roles, and invitations" },
+  { name: "Roles", icon: Shield, category: "Administration", description: "Workspace role hierarchy and member assignments" },
+  { name: "Permissions", icon: ShieldCheck, category: "Administration", description: "Granular action permissions per role & module" },
+  { name: "Activity Log", icon: Clock3, category: "Administration", description: "System audit trail, security events, and user activity history" },
 ];
 
 const ACTION_COLUMNS: { key: keyof PermissionActions; label: string; icon: typeof Eye }[] = [

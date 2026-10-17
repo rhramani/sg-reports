@@ -4,7 +4,7 @@ import { LoginRequest, LoginResponse, UserSession } from "@shared/api";
 import { generateToken, authenticateToken, AuthRequest } from "../middleware/auth";
 import { UserModel } from "../models/User";
 import { RoleModel } from "../models/Role";
-import { getDefaultModulePermissions } from "./roles";
+import { getDefaultModulePermissions, mergeRolePermissionsWithDefaults } from "./roles";
 import { getDBStatus } from "../db";
 import { logActivity, startUserSession, endUserSession } from "../utils/auditLogger";
 
@@ -142,11 +142,10 @@ authRouter.post("/login", async (req, res) => {
     let modulePermissions;
     try {
       const roleDoc = await RoleModel.findOne({ role: dbUser.role });
-      if (roleDoc && roleDoc.modulePermissions && roleDoc.modulePermissions.length > 0) {
-        modulePermissions = roleDoc.modulePermissions;
-      } else {
-        modulePermissions = getDefaultModulePermissions(dbUser.role);
-      }
+      modulePermissions = mergeRolePermissionsWithDefaults(
+        dbUser.role,
+        roleDoc?.modulePermissions
+      );
     } catch {
       modulePermissions = getDefaultModulePermissions(dbUser.role);
     }
@@ -226,11 +225,10 @@ authRouter.get("/me", authenticateToken, async (req: AuthRequest, res) => {
   const currentRole = dbUser?.role || req.user.role;
   try {
     const roleDoc = await RoleModel.findOne({ role: currentRole });
-    if (roleDoc && roleDoc.modulePermissions && roleDoc.modulePermissions.length > 0) {
-      modulePermissions = roleDoc.modulePermissions;
-    } else {
-      modulePermissions = getDefaultModulePermissions(currentRole);
-    }
+    modulePermissions = mergeRolePermissionsWithDefaults(
+      currentRole,
+      roleDoc?.modulePermissions
+    );
   } catch {
     modulePermissions = getDefaultModulePermissions(currentRole);
   }
