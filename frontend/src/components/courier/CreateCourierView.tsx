@@ -863,12 +863,22 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
         const senderLine =
           slip.fromSender || "From :- S G SURAT 9601511329 - 7405415105";
 
+        const providerLen = providerHeader.length;
+        const topRightFontSize =
+          providerLen > 36
+            ? "5.4pt"
+            : providerLen > 30
+              ? "6.0pt"
+              : providerLen > 24
+                ? "6.6pt"
+                : "7.2pt";
+
         const triFontSize =
           triangleAmount.length > 7
-            ? "10"
+            ? "11"
             : triangleAmount.length > 5
-              ? "11.5"
-              : "13";
+              ? "12.5"
+              : "14";
 
         return `
           <div class="slip-page">
@@ -876,7 +886,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
               <!-- Top Row -->
               <div class="slip-top">
                 <div class="slip-top-left">${escapeHtml(paymentHeader)}</div>
-                <div class="slip-top-right">${escapeHtml(providerHeader)}</div>
+                <div class="slip-top-right" style="font-size: ${topRightFontSize};">${escapeHtml(providerHeader)}</div>
               </div>
 
               <!-- Middle Row -->
@@ -888,8 +898,8 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                     <svg viewBox="0 0 100 100" class="slip-tri-svg">
                       <line x1="0" y1="100" x2="100" y2="0" stroke="#000000" stroke-width="2.5" />
                       <g transform="rotate(-45, 50, 50)">
-                        <text x="50" y="38" text-anchor="middle" fill="#000000" font-weight="900" font-size="11.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
-                        <text x="50" y="64" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
+                        <text x="50" y="37" text-anchor="middle" fill="#000000" font-weight="900" font-size="13.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
+                        <text x="50" y="63" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
                       </g>
                     </svg>
                   </div>
@@ -1006,7 +1016,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       max-width: 73.4mm !important;
       max-height: 48.4mm !important;
       border: 1.5px solid #000000 !important;
-      border-radius: 2px !important;
+      border-radius: 0 !important;
       display: flex !important;
       flex-direction: column !important;
       justify-content: space-between !important;
@@ -1016,14 +1026,15 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       box-sizing: border-box !important;
     }
     .slip-top {
-      height: 5.8mm !important;
-      min-height: 5.8mm !important;
-      max-height: 5.8mm !important;
+      height: 6mm !important;
+      min-height: 6mm !important;
+      max-height: 6mm !important;
       padding: 0.5mm 1.5mm !important;
       border-bottom: 1.2px solid #000000 !important;
       display: flex !important;
       align-items: center !important;
       justify-content: space-between !important;
+      gap: 1.5mm !important;
       font-size: 7.2pt !important;
       font-weight: 900 !important;
       line-height: 1 !important;
@@ -1033,21 +1044,24 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
     .slip-top-left {
       text-transform: uppercase !important;
       white-space: nowrap !important;
-      overflow: hidden !important;
       flex-shrink: 0 !important;
+      font-weight: 900 !important;
     }
     .slip-top-right {
       text-transform: uppercase !important;
       text-align: right !important;
       white-space: nowrap !important;
-      overflow: hidden !important;
-      flex-shrink: 0 !important;
+      flex: 1 !important;
+      min-width: 0 !important;
+      font-weight: 900 !important;
+      letter-spacing: -0.15px !important;
+      overflow: visible !important;
     }
     .slip-mid {
       flex: 1 !important;
-      height: 36.8mm !important;
-      min-height: 36.8mm !important;
-      max-height: 36.8mm !important;
+      height: 36.6mm !important;
+      min-height: 36.6mm !important;
+      max-height: 36.6mm !important;
       padding: 0.6mm 1.5mm !important;
       border-bottom: 1.2px solid #000000 !important;
       display: flex !important;
@@ -1067,15 +1081,15 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       align-items: center !important;
       justify-content: flex-start !important;
       position: relative !important;
-      padding-top: 9mm !important;
+      padding-top: 9.5mm !important;
       box-sizing: border-box !important;
     }
     .slip-tri-wrap {
       position: absolute !important;
       top: -0.6mm !important;
       left: -1.5mm !important;
-      width: 14mm !important;
-      height: 14mm !important;
+      width: 16.5mm !important;
+      height: 16.5mm !important;
       pointer-events: none !important;
     }
     .slip-tri-svg {
@@ -1376,7 +1390,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
             max-width: 73.4mm !important;
             max-height: 48.4mm !important;
             border: 1.5px solid #000 !important;
-            border-radius: 2px !important;
+            border-radius: 0 !important;
             box-shadow: none !important;
             display: flex !important;
             flex-direction: column !important;
@@ -1402,11 +1416,28 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
+            gap: 1.5mm !important;
             font-size: 7.2pt !important;
             font-weight: 900 !important;
             line-height: 1 !important;
             box-sizing: border-box !important;
             flex-shrink: 0 !important;
+          }
+          .slip-row-top-left {
+            text-transform: uppercase !important;
+            white-space: nowrap !important;
+            flex-shrink: 0 !important;
+            font-weight: 900 !important;
+          }
+          .slip-row-top-right {
+            text-transform: uppercase !important;
+            text-align: right !important;
+            white-space: nowrap !important;
+            flex: 1 !important;
+            min-width: 0 !important;
+            font-weight: 900 !important;
+            letter-spacing: -0.15px !important;
+            overflow: visible !important;
           }
           /* Row 2: Middle Area */
           .slip-row-middle {
@@ -1432,15 +1463,15 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
             align-items: center !important;
             justify-content: flex-start !important;
             position: relative !important;
-            padding-top: 9mm !important;
+            padding-top: 9.5mm !important;
             box-sizing: border-box !important;
           }
           .slip-triangle-svg {
             position: absolute !important;
             top: -0.6mm !important;
             left: -1.5mm !important;
-            width: 14mm !important;
-            height: 14mm !important;
+            width: 16.5mm !important;
+            height: 16.5mm !important;
             pointer-events: none !important;
           }
           .slip-oval-block {
@@ -2264,14 +2295,14 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                 </div>
 
                 {/* Micro Preview of Slip */}
-                <div className="bg-white text-black rounded-xl border-2 border-black font-sans text-xs select-none shadow-xs overflow-hidden">
+                <div className="bg-white text-black rounded-none border-2 border-black font-sans text-xs select-none shadow-xs overflow-hidden">
                   <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-black uppercase p-2.5 pb-2 border-b-2 border-black gap-2">
                     <div className="shrink-0 whitespace-nowrap">
                       {courierType === "VPP"
                         ? "VPP"
                         : `IS:- ${paymentStatus?.toUpperCase() || "UNPAID"}`}
                     </div>
-                    <div className="text-right shrink-0 whitespace-nowrap tracking-wide">
+                    <div className="text-right flex-1 min-w-0 whitespace-nowrap tracking-tight text-[9.5px] sm:text-[10.5px]">
                       SERVICE PROVIDER :-{" "}
                       {serviceProvider || "JAY AMBE LOGISTIC"}
                     </div>
@@ -2280,7 +2311,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   <div className="py-2.5 px-2 flex items-center justify-between min-h-[85px] relative">
                     {/* Diagonal Cross Line Touching Top Line and Side Line */}
                     <svg
-                      className="absolute top-0 left-0 w-[54px] h-[54px] pointer-events-none select-none"
+                      className="absolute top-0 left-0 w-[58px] h-[58px] pointer-events-none select-none"
                       viewBox="0 0 100 100"
                     >
                       <line
@@ -2294,11 +2325,11 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                       <g transform="rotate(-45 50 50)">
                         <text
                           x="50"
-                          y="38"
+                          y="37"
                           textAnchor="middle"
                           fill="black"
                           fontWeight="900"
-                          fontSize="11.5"
+                          fontSize="13.5"
                           letterSpacing="0.3"
                           fontFamily="system-ui, sans-serif"
                         >
@@ -2306,7 +2337,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                         </text>
                         <text
                           x="50"
-                          y="64"
+                          y="63"
                           textAnchor="middle"
                           fill="black"
                           fontWeight="900"
@@ -2315,13 +2346,13 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                               effectiveCalculationTotal,
                               insurance,
                             ).length > 7
-                              ? "10"
+                              ? "11"
                               : getTriangleBadgeAmount(
                                     effectiveCalculationTotal,
                                     insurance,
                                   ).length > 5
-                                ? "11.5"
-                                : "13"
+                                ? "12.5"
+                                : "14"
                           }
                           letterSpacing="0.2"
                           fontFamily="ui-monospace, monospace"
@@ -3222,16 +3253,26 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
 
                     <div
                       id={idx === 0 ? "printable-courier-slip" : undefined}
-                      className="printable-courier-slip w-[450px] max-w-full aspect-[75/50] bg-white text-black font-sans select-text border-2 border-black rounded-sm shadow-sm overflow-hidden flex flex-col justify-between"
+                      className="printable-courier-slip w-[450px] max-w-full aspect-[75/50] bg-white text-black font-sans select-text border-2 border-black rounded-none shadow-sm overflow-hidden flex flex-col justify-between"
                     >
                       {/* 1. TOP ROW: IS:- UNPAID / PAID (or VPP) & SERVICE PROVIDER */}
                       <div className="slip-row-top flex items-center justify-between px-3 py-1.5 text-[12px] font-black tracking-wide border-b-2 border-black gap-2 shrink-0">
-                        <div className="uppercase shrink-0 whitespace-nowrap">
+                        <div className="slip-row-top-left uppercase shrink-0 whitespace-nowrap">
                           {slip.courierType === "VPP"
                             ? "VPP"
                             : `IS:- ${slip.paymentStatus?.toUpperCase() || "UNPAID"}`}
                         </div>
-                        <div className="uppercase tracking-wide text-right shrink-0 whitespace-nowrap">
+                        <div
+                          className="slip-row-top-right uppercase tracking-tight text-right flex-1 min-w-0 whitespace-nowrap"
+                          style={{
+                            fontSize:
+                              `SERVICE PROVIDER :- ${slip.serviceProvider || "JAY AMBE LOGISTIC"}`.length > 36
+                                ? "9.5px"
+                                : `SERVICE PROVIDER :- ${slip.serviceProvider || "JAY AMBE LOGISTIC"}`.length > 30
+                                  ? "10.5px"
+                                  : "12px",
+                          }}
+                        >
                           SERVICE PROVIDER :-{" "}
                           {slip.serviceProvider || "JAY AMBE LOGISTIC"}
                         </div>
@@ -3243,7 +3284,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                         <div className="slip-left-col relative w-[135px] shrink-0 flex flex-col items-center justify-start pt-10">
                           {/* Left: Diagonal Cross Line Touching Top Divider and Side Border */}
                           <svg
-                            className="slip-triangle-svg absolute top-0 left-0 w-[64px] h-[64px] pointer-events-none select-none"
+                            className="slip-triangle-svg absolute top-0 left-0 w-[68px] h-[68px] pointer-events-none select-none"
                             viewBox="0 0 100 100"
                           >
                             <line
@@ -3257,19 +3298,19 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                             <g transform="rotate(-45 50 50)">
                               <text
                                 x="50"
-                                y="38"
+                                y="37"
                                 textAnchor="middle"
                                 fill="black"
                                 fontWeight="900"
-                                fontSize="11.5"
-                                letterSpacing="0.4"
+                                fontSize="13.5"
+                                letterSpacing="0.3"
                                 fontFamily="system-ui, -apple-system, sans-serif"
                               >
                                 Insurance
                               </text>
                               <text
                                 x="50"
-                                y="64"
+                                y="63"
                                 textAnchor="middle"
                                 fill="black"
                                 fontWeight="900"
@@ -3278,15 +3319,15 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                                     getShipmentValuation(slip),
                                     slip.insurance,
                                   ).length > 7
-                                    ? "10"
+                                    ? "11"
                                     : getTriangleBadgeAmount(
                                           getShipmentValuation(slip),
                                           slip.insurance,
                                         ).length > 5
-                                      ? "11.5"
-                                      : "13"
+                                      ? "12.5"
+                                      : "14"
                                 }
-                                letterSpacing="0.3"
+                                letterSpacing="0.2"
                                 fontFamily="ui-monospace, monospace"
                               >
                                 {getTriangleBadgeAmount(
