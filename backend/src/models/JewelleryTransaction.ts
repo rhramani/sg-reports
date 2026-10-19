@@ -16,7 +16,7 @@ const JewelleryTransactionReportSchema = new Schema<IJewelleryTransactionDoc>(
     reportName: { type: String, required: true, default: "Jewellery Transaction Report" },
     sourceFile: { type: String, default: "Uploaded_Sheet.xlsx" },
     headers: [String],
-    data: { type: [Schema.Types.Mixed], select: false },
+    data: [Schema.Types.Mixed],
     rowCount: { type: Number, default: 0 },
     uploadedBy: { type: String, default: "Admin" },
   },
