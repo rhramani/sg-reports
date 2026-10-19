@@ -15,6 +15,16 @@ function getBackendTarget(): string {
       }
     }
   } catch {}
+  try {
+    const backendEnv = path.resolve(__dirname, "../backend/.env");
+    if (fs.existsSync(backendEnv)) {
+      const content = fs.readFileSync(backendEnv, "utf-8");
+      const match = content.match(/^PORT\s*=\s*(\d+)/m);
+      if (match && match[1]) {
+        return `http://localhost:${match[1]}`;
+      }
+    }
+  } catch {}
   return "http://localhost:3000";
 }
 
@@ -34,6 +44,7 @@ export default defineConfig({
       "/api": {
         target: getBackendTarget(),
         changeOrigin: true,
+        router: () => getBackendTarget(),
       },
     },
   },

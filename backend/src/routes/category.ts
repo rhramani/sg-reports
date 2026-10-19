@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { CategoryModel } from "../models/Category";
-import { JewelleryTransactionReportModel } from "../models/JewelleryTransaction";
+import { JewelleryTransactionReportModel, JewelleryTransactionRowModel } from "../models/JewelleryTransaction";
 import { AuditLogModel } from "../models/AuditLog";
 
 export const categoryRouter = Router();
@@ -59,11 +59,11 @@ categoryRouter.get("/", async (_req: Request, res: Response) => {
     });
 
     const report = await JewelleryTransactionReportModel.findOne().sort({ createdAt: -1 });
-    if (report && Array.isArray(report.data)) {
-      const metalKey = findBaseMetalKey(report.headers, report.data[0]);
+    if (report && Array.isArray(report.headers)) {
+      const metalKey = findBaseMetalKey(report.headers);
       if (metalKey) {
-        report.data.forEach((r) => {
-          const val = r[metalKey];
+        const distinctMetals = await JewelleryTransactionRowModel.distinct(`data.${metalKey}`, { reportId: report._id });
+        distinctMetals.forEach((val) => {
           if (val !== undefined && val !== null) {
             const s = String(val).trim();
             if (s && s !== "-" && s !== "N/A" && s !== "null") metalSet.add(s);
@@ -90,19 +90,29 @@ categoryRouter.get("/", async (_req: Request, res: Response) => {
 categoryRouter.post("/sync-from-transactions", async (_req: Request, res: Response) => {
   try {
     const report = await JewelleryTransactionReportModel.findOne().sort({ createdAt: -1 });
-    if (!report || !Array.isArray(report.data) || report.data.length === 0) {
+    if (!report || !Array.isArray(report.headers)) {
       return res.status(400).json({ success: false, error: "No transaction dataset available to sync from." });
     }
 
-    const catKey = findCategoryKey(report.headers, report.data[0]);
-    const metalKey = findBaseMetalKey(report.headers, report.data[0]);
+    const catKey = findCategoryKey(report.headers);
+    const metalKey = findBaseMetalKey(report.headers);
 
     if (!catKey) {
       return res.status(400).json({ success: false, error: "Category column not found in transaction dataset." });
     }
 
+    const rowDocs = await JewelleryTransactionRowModel.find(
+      { reportId: report._id },
+      { [`data.${catKey}`]: 1, ...(metalKey ? { [`data.${metalKey}`]: 1 } : {}), _id: 0 }
+    ).lean();
+
+    if (!rowDocs || rowDocs.length === 0) {
+      return res.status(400).json({ success: false, error: "No transaction rows available to sync from." });
+    }
+
     const pairsMap = new Map<string, { name: string; baseMetal: string }>();
-    report.data.forEach((row) => {
+    rowDocs.forEach((r: any) => {
+      const row = r.data || {};
       const c = String(row[catKey] || "").trim();
       const m = metalKey ? String(row[metalKey] || "").trim() : "";
       if (c && c !== "-" && c !== "N/A") {
