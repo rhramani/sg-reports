@@ -5,13 +5,13 @@ import fs from "node:fs";
 
 function getBackendTarget(): string {
   const envPort = process.env.BACKEND_PORT || process.env.PORT;
-  if (envPort) return `http://localhost:${envPort}`;
+  if (envPort) return `http://127.0.0.1:${envPort}`;
   try {
     const portFile = path.resolve(__dirname, "../.backend-port");
     if (fs.existsSync(portFile)) {
       const p = fs.readFileSync(portFile, "utf-8").trim();
       if (p && !isNaN(Number(p))) {
-        return `http://localhost:${p}`;
+        return `http://127.0.0.1:${p}`;
       }
     }
   } catch {}
@@ -21,11 +21,11 @@ function getBackendTarget(): string {
       const content = fs.readFileSync(backendEnv, "utf-8");
       const match = content.match(/^PORT\s*=\s*(\d+)/m);
       if (match && match[1]) {
-        return `http://localhost:${match[1]}`;
+        return `http://127.0.0.1:${match[1]}`;
       }
     }
   } catch {}
-  return "http://localhost:3000";
+  return "http://127.0.0.1:3000";
 }
 
 // https://vitejs.dev/config/
@@ -45,6 +45,19 @@ export default defineConfig({
         target: getBackendTarget(),
         changeOrigin: true,
         router: () => getBackendTarget(),
+        configure: (proxy) => {
+          proxy.on("error", (err, _req, res) => {
+            if (res && "writeHead" in res && !res.headersSent) {
+              res.writeHead(503, { "Content-Type": "application/json" });
+              res.end(
+                JSON.stringify({
+                  success: false,
+                  error: `Backend server unreachable at ${getBackendTarget()}. Please verify backend is running.`,
+                }),
+              );
+            }
+          });
+        },
       },
     },
   },

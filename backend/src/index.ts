@@ -117,7 +117,7 @@ export function startServerWithFallback(
         }
       });
 
-      server.listen(currentPort, () => {
+      server.listen(currentPort, "0.0.0.0", () => {
         const addr = server.address() as AddressInfo;
         const boundPort = addr ? addr.port : currentPort;
         resolve({ server, port: boundPort });
