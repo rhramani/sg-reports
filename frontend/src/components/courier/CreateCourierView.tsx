@@ -77,31 +77,31 @@ export interface CourierShipment {
 }
 
 /**
- * Helper to determine if a shipment calculated amount (Total Amount - Insurance) is >= ₹100,000 (1 Lakh).
- * - If (Total Amount - Insurance) >= ₹100,000:
+ * Helper to determine if a shipment amount is >= ₹100,000 (1 Lakh).
+ * - If Amount >= ₹100,000:
+ *     Only then subtract insurance (Total Amount - Insurance)
  *     Triangle badge displays: Insurance amount (default 10000)
- *     Center displays: Round oval circle with first 3 digits of (Total Amount - Insurance)
- * - If (Total Amount - Insurance) < ₹100,000:
- *     Triangle badge displays: (Total Amount - Insurance) in place of Insurance amount
+ *     Center displays: Round oval circle with token code of (Total Amount - Insurance)
+ * - If Amount < ₹100,000:
+ *     Don't need to minus insurance!
+ *     Triangle badge displays: Full Amount (without subtracting insurance)
  *     Center displays: NO oval circle
  */
-const isShipmentOver1Lakh = (
+export const isShipmentOver1Lakh = (
   totalVal?: number | string,
-  insVal?: number | string,
+  _insVal?: number | string,
 ): boolean => {
   const total = parseFloat(String(totalVal)) || 0;
-  const ins = parseFloat(String(insVal)) || 0;
   if (!total) return false;
-  const diff = total - ins;
-  return diff >= 100000;
+  return total >= 100000;
 };
 
 /**
  * Returns what to display inside the triangle under "Insurance".
- * - If (Total Amount - Insurance) >= 100,000: returns the Insurance amount (default 10000).
- * - If (Total Amount - Insurance) < 100,000: returns (Total Amount - Insurance) (e.g. 15,000 - 10,000 = 5,000).
+ * - If Amount >= 100,000: returns the Insurance amount (default 10000).
+ * - If Amount < 100,000: don't minus insurance, returns Full Amount (e.g. 50,000).
  */
-const getTriangleBadgeAmount = (
+export const getTriangleBadgeAmount = (
   totalVal?: number | string,
   insVal?: number | string,
 ): string => {
@@ -113,12 +113,13 @@ const getTriangleBadgeAmount = (
     return String(ins || 10000);
   }
 
-  const diff = total - ins;
-  if (diff >= 100000) {
+  // If amount >= 100,000: triangle displays Insurance amount (default 10000)
+  if (total >= 100000) {
     return String(ins || 10000);
   }
 
-  const netAmount = Math.max(0, Math.round(diff * 100) / 100);
+  // If amount < 100,000: don't minus insurance, show full amount in triangle
+  const netAmount = Math.max(0, Math.round(total * 100) / 100);
   return netAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 };
 
@@ -133,14 +134,15 @@ const getTriangleBadgeAmount = (
  * Manages round figure: e.g. 111 to 119 -> 120, 289 -> 290, 1775 -> 1780 (round up to next 10).
  * If amount/rate is not entered or 0, returns "----" matching the reference design.
  */
-const getRateInsuranceCode = (
+export const getRateInsuranceCode = (
   rateVal?: number | string,
   insVal?: number | string,
 ): string => {
   const r = parseFloat(String(rateVal)) || 0;
   const ins = parseFloat(String(insVal)) || 0;
   if (!r) return "----";
-  const diff = r - ins;
+  // If amount is less than 100,000: don't minus insurance; if >= 100,000: minus insurance
+  const diff = r >= 100000 ? r - ins : r;
   if (diff <= 0) return "000";
 
   // Determine target digit count based on slab:
@@ -2152,7 +2154,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                           insurance,
                         )
                           ? "Total Amount − Insurance (₹)"
-                          : "Amount in Triangle (Net < ₹1,00,000)"}
+                          : "Amount in Triangle (Amount < ₹1,00,000)"}
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
                         {isShipmentOver1Lakh(
@@ -2172,16 +2174,8 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                           </span>
                         ) : effectiveCalculationTotal > 0 ? (
                           <span>
-                            ₹{effectiveCalculationTotal.toLocaleString()} − ₹
-                            {(
-                              parseFloat(String(insurance)) || 0
-                            ).toLocaleString()}{" "}
-                            = ₹
-                            {getTriangleBadgeAmount(
-                              effectiveCalculationTotal,
-                              insurance,
-                            )}{" "}
-                            in corner triangle (No circle)
+                            ₹{effectiveCalculationTotal.toLocaleString()}{" "}
+                            in corner triangle (Amount &lt; ₹1,00,000: no insurance deduction)
                           </span>
                         ) : (
                           <span>Auto-calculated token code</span>
@@ -2199,8 +2193,8 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                           effectiveCalculationTotal,
                           insurance,
                         )
-                          ? "Token Code in Circle (Net ≥ ₹1,00,000)"
-                          : "Net amount shows in triangle; circle hidden for Net < ₹1,00,000"}
+                          ? "Token Code in Circle (Amount ≥ ₹1,00,000)"
+                          : "Full amount shows in triangle; circle hidden for Amount < ₹1,00,000"}
                       </div>
                     </div>
 
@@ -3839,15 +3833,15 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                         editingShipment.insurance,
                       )
                         ? "Total Amount − Insurance (₹)"
-                        : "Amount in Triangle (Net < ₹1,00,000)"}
+                        : "Amount in Triangle (Amount < ₹1,00,000)"}
                     </div>
                     <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">
                       {isShipmentOver1Lakh(
                         getShipmentValuation(editingShipment),
                         editingShipment.insurance,
                       )
-                        ? "Token Code in Circle (Net ≥ ₹1,00,000)"
-                        : "Net amount shows in triangle; no round circle"}
+                        ? "Token Code in Circle (Amount ≥ ₹1,00,000)"
+                        : "Full amount shows in triangle; no round circle"}
                     </div>
                   </div>
                   {isShipmentOver1Lakh(
