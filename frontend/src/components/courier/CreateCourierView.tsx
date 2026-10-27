@@ -900,7 +900,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                     <svg viewBox="0 0 100 100" class="slip-tri-svg">
                       <line x1="0" y1="100" x2="100" y2="0" stroke="#000000" stroke-width="2.5" />
                       <g transform="rotate(-45, 50, 50)">
-                        <text x="50" y="37" text-anchor="middle" fill="#000000" font-weight="900" font-size="13.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
+                        <text x="50" y="37" text-anchor="middle" fill="#000000" stroke="#000000" stroke-width="0.6" paint-order="stroke fill" font-weight="900" font-size="17" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
                         <text x="50" y="63" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
                       </g>
                     </svg>
@@ -2322,8 +2322,11 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                           y="37"
                           textAnchor="middle"
                           fill="black"
+                          stroke="black"
+                          strokeWidth="0.6"
+                          paintOrder="stroke fill"
                           fontWeight="900"
-                          fontSize="13.5"
+                          fontSize="17"
                           letterSpacing="0.3"
                           fontFamily="system-ui, sans-serif"
                         >
@@ -3295,8 +3298,11 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                                 y="37"
                                 textAnchor="middle"
                                 fill="black"
+                                stroke="black"
+                                strokeWidth="0.6"
+                                paintOrder="stroke fill"
                                 fontWeight="900"
-                                fontSize="13.5"
+                                fontSize="17"
                                 letterSpacing="0.3"
                                 fontFamily="system-ui, -apple-system, sans-serif"
                               >
