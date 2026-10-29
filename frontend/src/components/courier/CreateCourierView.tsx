@@ -900,8 +900,8 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                     <svg viewBox="0 0 100 100" class="slip-tri-svg">
                       <line x1="0" y1="100" x2="100" y2="0" stroke="#000000" stroke-width="2.5" />
                       <g transform="rotate(-45, 50, 50)">
-                        <text x="50" y="37" text-anchor="middle" fill="#000000" stroke="#000000" stroke-width="0.6" paint-order="stroke fill" font-weight="900" font-size="17" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
-                        <text x="50" y="63" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
+                        <text x="50" y="34" text-anchor="middle" fill="#000000" font-weight="900" font-size="13.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
+                        <text x="50" y="68" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
                       </g>
                     </svg>
                   </div>
@@ -1083,7 +1083,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       align-items: center !important;
       justify-content: flex-start !important;
       position: relative !important;
-      padding-top: 9.5mm !important;
+      padding-top: 14mm !important;
       box-sizing: border-box !important;
     }
     .slip-tri-wrap {
@@ -1465,7 +1465,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
             align-items: center !important;
             justify-content: flex-start !important;
             position: relative !important;
-            padding-top: 9.5mm !important;
+            padding-top: 14mm !important;
             box-sizing: border-box !important;
           }
           .slip-triangle-svg {
@@ -2319,14 +2319,11 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                       <g transform="rotate(-45 50 50)">
                         <text
                           x="50"
-                          y="37"
+                          y="34"
                           textAnchor="middle"
                           fill="black"
-                          stroke="black"
-                          strokeWidth="0.6"
-                          paintOrder="stroke fill"
                           fontWeight="900"
-                          fontSize="17"
+                          fontSize="13.5"
                           letterSpacing="0.3"
                           fontFamily="system-ui, sans-serif"
                         >
@@ -2334,7 +2331,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                         </text>
                         <text
                           x="50"
-                          y="63"
+                          y="68"
                           textAnchor="middle"
                           fill="black"
                           fontWeight="900"
@@ -3278,7 +3275,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                       {/* 2. MIDDLE ROW */}
                       <div className="slip-row-middle py-1.5 px-2 relative flex-1 flex items-start justify-start border-b-2 border-black min-h-[140px] overflow-hidden gap-1">
                         {/* Left Column: Triangle in Corner + Oval Badge & VPP Fine/Amount */}
-                        <div className="slip-left-col relative w-[135px] shrink-0 flex flex-col items-center justify-start pt-10">
+                        <div className="slip-left-col relative w-[135px] shrink-0 flex flex-col items-center justify-start pt-12">
                           {/* Left: Diagonal Cross Line Touching Top Divider and Side Border */}
                           <svg
                             className="slip-triangle-svg absolute top-0 left-0 w-[68px] h-[68px] pointer-events-none select-none"
@@ -3295,14 +3292,11 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                             <g transform="rotate(-45 50 50)">
                               <text
                                 x="50"
-                                y="37"
+                                y="34"
                                 textAnchor="middle"
                                 fill="black"
-                                stroke="black"
-                                strokeWidth="0.6"
-                                paintOrder="stroke fill"
                                 fontWeight="900"
-                                fontSize="17"
+                                fontSize="13.5"
                                 letterSpacing="0.3"
                                 fontFamily="system-ui, -apple-system, sans-serif"
                               >
@@ -3310,7 +3304,7 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                               </text>
                               <text
                                 x="50"
-                                y="63"
+                                y="68"
                                 textAnchor="middle"
                                 fill="black"
                                 fontWeight="900"
