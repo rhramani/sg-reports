@@ -27,6 +27,8 @@ import {
   Plus,
   ArrowLeft,
   Package,
+  Square,
+  Slash,
 } from "lucide-react";
 import { authFetch } from "@/lib/apiClient";
 import { Pagination } from "@/components/ui/Pagination";
@@ -288,6 +290,23 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
   const [slipToPrint, setSlipToPrint] = useState<CourierShipment | null>(null);
   const [slipsToPrint, setSlipsToPrint] = useState<CourierShipment[]>([]);
   const [selectedShipmentIds, setSelectedShipmentIds] = useState<string[]>([]);
+
+  // Slip Badge Style: 'straight' (clean horizontal box for crisp thermal printing) vs 'diagonal' (cross line)
+  const [badgeStyle, setBadgeStyleState] = useState<"straight" | "diagonal">(() => {
+    try {
+      const saved = localStorage.getItem("sg_courier_slip_badge_style");
+      return saved === "diagonal" ? "diagonal" : "straight";
+    } catch {
+      return "straight";
+    }
+  });
+
+  const setBadgeStyle = (style: "straight" | "diagonal") => {
+    setBadgeStyleState(style);
+    try {
+      localStorage.setItem("sg_courier_slip_badge_style", style);
+    } catch {}
+  };
 
   // Edit Modal
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -827,7 +846,11 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
   };
 
   // Dedicated thermal print via isolated iframe (eliminates modal fixed/overflow clipping and multi-page overlaps)
-  const printConsignmentSlips = (slips: CourierShipment[]) => {
+  // Dedicated thermal print via isolated iframe (eliminates modal fixed/overflow clipping and multi-page overlaps)
+  const printConsignmentSlips = (
+    slips: CourierShipment[],
+    style: "straight" | "diagonal" = badgeStyle,
+  ) => {
     if (!slips.length) return;
 
     // Remove any leftover thermal print iframe
@@ -843,6 +866,8 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       "position:fixed;top:-10000px;left:-10000px;width:75mm;height:50mm;border:0;visibility:hidden;",
     );
     document.body.appendChild(iframe);
+
+    const isStraight = style === "straight";
 
     const slipsHtml = slips
       .map((slip) => {
@@ -882,6 +907,25 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
               ? "12.5"
               : "14";
 
+        const badgeHtml = isStraight
+          ? `
+            <div class="slip-straight-badge">
+              <div class="slip-straight-title">INSURANCE</div>
+              <div class="slip-straight-amt">${escapeHtml(triangleAmount)}</div>
+            </div>
+          `
+          : `
+            <div class="slip-tri-wrap">
+              <svg viewBox="0 0 100 100" class="slip-tri-svg" shape-rendering="geometricPrecision" text-rendering="geometricPrecision">
+                <line x1="0" y1="100" x2="100" y2="0" stroke="#000000" stroke-width="2.5" stroke-linecap="square" />
+                <g transform="rotate(-45, 50, 50)">
+                  <text x="50" y="34" text-anchor="middle" fill="#000000" font-weight="900" font-size="13.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
+                  <text x="50" y="68" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
+                </g>
+              </svg>
+            </div>
+          `;
+
         return `
           <div class="slip-page">
             <div class="slip-card">
@@ -893,20 +937,11 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
 
               <!-- Middle Row -->
               <div class="slip-mid">
-                <!-- Left Column: Triangle in Top Corner + Oval Badge & VPP Fine/Amount shifted left & up -->
-                <div class="slip-left-col">
-                  <!-- Triangle SVG -->
-                  <div class="slip-tri-wrap">
-                    <svg viewBox="0 0 100 100" class="slip-tri-svg">
-                      <line x1="0" y1="100" x2="100" y2="0" stroke="#000000" stroke-width="2.5" />
-                      <g transform="rotate(-45, 50, 50)">
-                        <text x="50" y="34" text-anchor="middle" fill="#000000" font-weight="900" font-size="13.5" letter-spacing="0.3" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Insurance</text>
-                        <text x="50" y="68" text-anchor="middle" fill="#000000" font-weight="900" font-size="${triFontSize}" letter-spacing="0.2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">${escapeHtml(triangleAmount)}</text>
-                      </g>
-                    </svg>
-                  </div>
+                <!-- Left Column: Insurance Badge + Oval Badge & VPP Fine/Amount -->
+                <div class="slip-left-col ${isStraight ? "slip-col-straight" : "slip-col-diagonal"}">
+                  ${badgeHtml}
 
-                  <!-- Oval Badge & VPP Fine/Amount moved left & up -->
+                  <!-- Oval Badge & VPP Fine/Amount -->
                   <div class="slip-oval-block">
                     ${
                       isOver1Lakh
@@ -1083,8 +1118,50 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       align-items: center !important;
       justify-content: flex-start !important;
       position: relative !important;
-      padding-top: 14mm !important;
       box-sizing: border-box !important;
+    }
+    .slip-col-diagonal {
+      padding-top: 14mm !important;
+    }
+    .slip-col-straight {
+      padding-top: 1.5mm !important;
+    }
+    .slip-straight-badge {
+      width: 22mm !important;
+      max-width: 23mm !important;
+      border: 1.5px solid #000000 !important;
+      background: #ffffff !important;
+      box-sizing: border-box !important;
+      text-align: center !important;
+      margin-bottom: 2mm !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 0.8mm 1mm !important;
+    }
+    .slip-straight-title {
+      font-size: 6.8pt !important;
+      font-weight: 900 !important;
+      text-transform: uppercase !important;
+      letter-spacing: 0.5px !important;
+      line-height: 1.1 !important;
+      color: #000000 !important;
+      border-bottom: 1px solid #000000 !important;
+      width: 100% !important;
+      padding-bottom: 0.4mm !important;
+      margin-bottom: 0.4mm !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+      -webkit-text-stroke: 0.2px #000000 !important;
+    }
+    .slip-straight-amt {
+      font-size: 9.5pt !important;
+      font-weight: 900 !important;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+      line-height: 1.1 !important;
+      letter-spacing: 0.3px !important;
+      color: #000000 !important;
+      -webkit-text-stroke: 0.3px #000000 !important;
     }
     .slip-tri-wrap {
       position: absolute !important;
@@ -1105,6 +1182,13 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
       align-items: center !important;
       justify-content: flex-start !important;
       width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    .slip-col-straight .slip-oval-block {
+      margin-top: 0.5mm !important;
+      margin-left: 0 !important;
+    }
+    .slip-col-diagonal .slip-oval-block {
       margin-top: 0.5mm !important;
       margin-left: 3.5mm !important;
     }
@@ -1465,8 +1549,50 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
             align-items: center !important;
             justify-content: flex-start !important;
             position: relative !important;
-            padding-top: 14mm !important;
             box-sizing: border-box !important;
+          }
+          .slip-col-diagonal {
+            padding-top: 14mm !important;
+          }
+          .slip-col-straight {
+            padding-top: 1.5mm !important;
+          }
+          .slip-straight-badge {
+            width: 22mm !important;
+            max-width: 23mm !important;
+            border: 1.5px solid #000 !important;
+            background: #fff !important;
+            box-sizing: border-box !important;
+            text-align: center !important;
+            margin-bottom: 2mm !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            padding: 0.8mm 1mm !important;
+          }
+          .slip-straight-title {
+            font-size: 6.8pt !important;
+            font-weight: 900 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            line-height: 1.1 !important;
+            color: #000 !important;
+            border-bottom: 1px solid #000 !important;
+            width: 100% !important;
+            padding-bottom: 0.4mm !important;
+            margin-bottom: 0.4mm !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+            -webkit-text-stroke: 0.2px #000 !important;
+          }
+          .slip-straight-amt {
+            font-size: 9.5pt !important;
+            font-weight: 900 !important;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+            line-height: 1.1 !important;
+            letter-spacing: 0.3px !important;
+            color: #000 !important;
+            -webkit-text-stroke: 0.3px #000 !important;
           }
           .slip-triangle-svg {
             position: absolute !important;
@@ -1482,6 +1608,13 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
             align-items: center !important;
             justify-content: flex-start !important;
             width: 100% !important;
+            box-sizing: border-box !important;
+          }
+          .slip-col-straight .slip-oval-block {
+            margin-top: 0.5mm !important;
+            margin-left: 0 !important;
+          }
+          .slip-col-diagonal .slip-oval-block {
             margin-top: 0.5mm !important;
             margin-left: 3.5mm !important;
           }
@@ -2288,6 +2421,39 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   </span>
                 </div>
 
+                {/* Micro Preview Header with Badge Style Toggle */}
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 px-0.5">
+                  <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 text-[11px]">
+                    <span>Label Preview (75×50)</span>
+                  </span>
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setBadgeStyle("straight")}
+                      className={`px-2 py-0.5 rounded transition cursor-pointer font-bold ${
+                        badgeStyle === "straight"
+                          ? "bg-white dark:bg-slate-900 text-[#18476A] dark:text-cyan-400 shadow-2xs"
+                          : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                      }`}
+                      title="Straight horizontal badge (Clean Print)"
+                    >
+                      Straight
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBadgeStyle("diagonal")}
+                      className={`px-2 py-0.5 rounded transition cursor-pointer font-bold ${
+                        badgeStyle === "diagonal"
+                          ? "bg-white dark:bg-slate-900 text-[#18476A] dark:text-cyan-400 shadow-2xs"
+                          : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                      }`}
+                      title="Diagonal cross line in corner"
+                    >
+                      Cross
+                    </button>
+                  </div>
+                </div>
+
                 {/* Micro Preview of Slip */}
                 <div className="bg-white text-black rounded-none border-2 border-black font-sans text-xs select-none shadow-xs overflow-hidden">
                   <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-black uppercase p-2.5 pb-2 border-b-2 border-black gap-2">
@@ -2303,62 +2469,81 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   </div>
 
                   <div className="py-2.5 px-2 flex items-center justify-between min-h-[85px] relative">
-                    {/* Diagonal Cross Line Touching Top Line and Side Line */}
-                    <svg
-                      className="absolute top-0 left-0 w-[58px] h-[58px] pointer-events-none select-none"
-                      viewBox="0 0 100 100"
-                    >
-                      <line
-                        x1="0"
-                        y1="100"
-                        x2="100"
-                        y2="0"
-                        stroke="black"
-                        strokeWidth="2.5"
-                      />
-                      <g transform="rotate(-45 50 50)">
-                        <text
-                          x="50"
-                          y="34"
-                          textAnchor="middle"
-                          fill="black"
-                          fontWeight="900"
-                          fontSize="13.5"
-                          letterSpacing="0.3"
-                          fontFamily="system-ui, sans-serif"
-                        >
+                    {/* Left: Straight Badge OR Diagonal Cross Line */}
+                    {badgeStyle === "straight" ? (
+                      <div className="w-[66px] border-2 border-black bg-white text-center flex flex-col items-center justify-center p-1 shrink-0 shadow-2xs">
+                        <div className="text-[8px] font-black uppercase tracking-wider border-b border-black w-full pb-0.5 mb-0.5 text-black">
                           Insurance
-                        </text>
-                        <text
-                          x="50"
-                          y="68"
-                          textAnchor="middle"
-                          fill="black"
-                          fontWeight="900"
-                          fontSize={
-                            getTriangleBadgeAmount(
-                              effectiveCalculationTotal,
-                              insurance,
-                            ).length > 7
-                              ? "11"
-                              : getTriangleBadgeAmount(
-                                    effectiveCalculationTotal,
-                                    insurance,
-                                  ).length > 5
-                                ? "12.5"
-                                : "14"
-                          }
-                          letterSpacing="0.2"
-                          fontFamily="ui-monospace, monospace"
-                        >
+                        </div>
+                        <div className="font-mono font-black text-black text-[11px] leading-tight">
                           {getTriangleBadgeAmount(
                             effectiveCalculationTotal,
                             insurance,
                           )}
-                        </text>
-                      </g>
-                    </svg>
-                    <div className="w-[56px] shrink-0" />
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <svg
+                          className="absolute top-0 left-0 w-[58px] h-[58px] pointer-events-none select-none"
+                          viewBox="0 0 100 100"
+                          shapeRendering="geometricPrecision"
+                          textRendering="geometricPrecision"
+                        >
+                          <line
+                            x1="0"
+                            y1="100"
+                            x2="100"
+                            y2="0"
+                            stroke="black"
+                            strokeWidth="2.5"
+                            strokeLinecap="square"
+                          />
+                          <g transform="rotate(-45 50 50)">
+                            <text
+                              x="50"
+                              y="34"
+                              textAnchor="middle"
+                              fill="black"
+                              fontWeight="900"
+                              fontSize="13.5"
+                              letterSpacing="0.3"
+                              fontFamily="system-ui, sans-serif"
+                            >
+                              Insurance
+                            </text>
+                            <text
+                              x="50"
+                              y="68"
+                              textAnchor="middle"
+                              fill="black"
+                              fontWeight="900"
+                              fontSize={
+                                getTriangleBadgeAmount(
+                                  effectiveCalculationTotal,
+                                  insurance,
+                                ).length > 7
+                                  ? "11"
+                                  : getTriangleBadgeAmount(
+                                        effectiveCalculationTotal,
+                                        insurance,
+                                      ).length > 5
+                                    ? "12.5"
+                                    : "14"
+                              }
+                              letterSpacing="0.2"
+                              fontFamily="ui-monospace, monospace"
+                            >
+                              {getTriangleBadgeAmount(
+                                effectiveCalculationTotal,
+                                insurance,
+                              )}
+                            </text>
+                          </g>
+                        </svg>
+                        <div className="w-[56px] shrink-0" />
+                      </>
+                    )}
 
                     {/* Middle Section: Oval & Side of Round (Fine & Rate) */}
                     <div className="flex items-center gap-2 shrink-0">
@@ -3198,6 +3383,36 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* Badge Style Switcher */}
+                  <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold mr-1">
+                    <button
+                      type="button"
+                      onClick={() => setBadgeStyle("straight")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition cursor-pointer text-xs ${
+                        badgeStyle === "straight"
+                          ? "bg-white dark:bg-slate-900 text-[#18476A] dark:text-cyan-400 shadow-xs font-black"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                      }`}
+                      title="Straight horizontal badge: 100% crisp, sharp, perfectly readable on thermal printers"
+                    >
+                      <Square size={13} />
+                      <span>Straight (Clean Print)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBadgeStyle("diagonal")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition cursor-pointer text-xs ${
+                        badgeStyle === "diagonal"
+                          ? "bg-white dark:bg-slate-900 text-[#18476A] dark:text-cyan-400 shadow-xs font-black"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                      }`}
+                      title="Diagonal cross line in corner"
+                    >
+                      <Slash size={13} className="rotate-45" />
+                      <span>Diagonal / Cross</span>
+                    </button>
+                  </div>
+
                   <button
                     type="button"
                     onClick={executePrint}
@@ -3274,66 +3489,108 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
 
                       {/* 2. MIDDLE ROW */}
                       <div className="slip-row-middle py-1.5 px-2 relative flex-1 flex items-start justify-start border-b-2 border-black min-h-[140px] overflow-hidden gap-1">
-                        {/* Left Column: Triangle in Corner + Oval Badge & VPP Fine/Amount */}
-                        <div className="slip-left-col relative w-[135px] shrink-0 flex flex-col items-center justify-start pt-12">
-                          {/* Left: Diagonal Cross Line Touching Top Divider and Side Border */}
-                          <svg
-                            className="slip-triangle-svg absolute top-0 left-0 w-[68px] h-[68px] pointer-events-none select-none"
-                            viewBox="0 0 100 100"
-                          >
-                            <line
-                              x1="0"
-                              y1="100"
-                              x2="100"
-                              y2="0"
-                              stroke="black"
-                              strokeWidth="2.5"
-                            />
-                            <g transform="rotate(-45 50 50)">
-                              <text
-                                x="50"
-                                y="34"
-                                textAnchor="middle"
-                                fill="black"
-                                fontWeight="900"
-                                fontSize="13.5"
-                                letterSpacing="0.3"
-                                fontFamily="system-ui, -apple-system, sans-serif"
-                              >
+                        {/* Left Column: Straight Badge OR Diagonal Cross Line + Oval Badge & VPP Fine/Amount */}
+                        <div
+                          className={`slip-left-col relative w-[135px] shrink-0 flex flex-col items-center justify-start ${
+                            badgeStyle === "straight" ? "pt-2" : "pt-12"
+                          }`}
+                        >
+                          {badgeStyle === "straight" ? (
+                            <div className="slip-straight-badge w-[105px] border-2 border-black bg-white text-center mb-2.5 flex flex-col items-center justify-center p-1 shadow-2xs">
+                              <div className="text-[10px] font-black tracking-wider uppercase border-b border-black w-full pb-0.5 mb-0.5 text-black">
                                 Insurance
-                              </text>
-                              <text
-                                x="50"
-                                y="68"
-                                textAnchor="middle"
-                                fill="black"
-                                fontWeight="900"
-                                fontSize={
-                                  getTriangleBadgeAmount(
-                                    getShipmentValuation(slip),
-                                    slip.insurance,
-                                  ).length > 7
-                                    ? "11"
-                                    : getTriangleBadgeAmount(
-                                          getShipmentValuation(slip),
-                                          slip.insurance,
-                                        ).length > 5
-                                      ? "12.5"
-                                      : "14"
-                                }
-                                letterSpacing="0.2"
-                                fontFamily="ui-monospace, monospace"
+                              </div>
+                              <div
+                                className="font-mono font-black text-black leading-tight tracking-wide"
+                                style={{
+                                  fontSize:
+                                    getTriangleBadgeAmount(
+                                      getShipmentValuation(slip),
+                                      slip.insurance,
+                                    ).length > 7
+                                      ? "12px"
+                                      : getTriangleBadgeAmount(
+                                            getShipmentValuation(slip),
+                                            slip.insurance,
+                                          ).length > 5
+                                        ? "14px"
+                                        : "15.5px",
+                                }}
                               >
                                 {getTriangleBadgeAmount(
                                   getShipmentValuation(slip),
                                   slip.insurance,
                                 )}
-                              </text>
-                            </g>
-                          </svg>
+                              </div>
+                            </div>
+                          ) : (
+                            <svg
+                              className="slip-triangle-svg absolute top-0 left-0 w-[68px] h-[68px] pointer-events-none select-none"
+                              viewBox="0 0 100 100"
+                              shapeRendering="geometricPrecision"
+                              textRendering="geometricPrecision"
+                            >
+                              <line
+                                x1="0"
+                                y1="100"
+                                x2="100"
+                                y2="0"
+                                stroke="black"
+                                strokeWidth="2.5"
+                                strokeLinecap="square"
+                              />
+                              <g transform="rotate(-45 50 50)">
+                                <text
+                                  x="50"
+                                  y="34"
+                                  textAnchor="middle"
+                                  fill="black"
+                                  fontWeight="900"
+                                  fontSize="13.5"
+                                  letterSpacing="0.3"
+                                  fontFamily="system-ui, -apple-system, sans-serif"
+                                >
+                                  Insurance
+                                </text>
+                                <text
+                                  x="50"
+                                  y="68"
+                                  textAnchor="middle"
+                                  fill="black"
+                                  fontWeight="900"
+                                  fontSize={
+                                    getTriangleBadgeAmount(
+                                      getShipmentValuation(slip),
+                                      slip.insurance,
+                                    ).length > 7
+                                      ? "11"
+                                      : getTriangleBadgeAmount(
+                                            getShipmentValuation(slip),
+                                            slip.insurance,
+                                          ).length > 5
+                                        ? "12.5"
+                                        : "14"
+                                  }
+                                  letterSpacing="0.2"
+                                  fontFamily="ui-monospace, monospace"
+                                >
+                                  {getTriangleBadgeAmount(
+                                    getShipmentValuation(slip),
+                                    slip.insurance,
+                                  )}
+                                </text>
+                              </g>
+                            </svg>
+                          )}
 
                           {/* Oval & Fine/Rate with comfortable clearance */}
-                          <div className="slip-oval-block flex flex-col items-center justify-start w-full ml-3.5 mt-0.5">
+                          <div
+                            className={`slip-oval-block flex flex-col items-center justify-start w-full ${
+                              badgeStyle === "straight"
+                                ? "ml-0 mt-0"
+                                : "ml-3.5 mt-0.5"
+                            }`}
+                          >
                             {isShipmentOver1Lakh(
                               getShipmentValuation(slip),
                               slip.insurance,
