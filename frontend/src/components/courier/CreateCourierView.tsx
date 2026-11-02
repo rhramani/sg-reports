@@ -2409,24 +2409,17 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex items-center gap-1.5">
                     <Printer
-                      size={15}
+                      size={14}
                       className="text-[#18476A] dark:text-cyan-400"
                     />
                     <span className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                      Slip Preview (Image 2)
+                      Label Preview (75×50)
+                    </span>
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
+                      Live
                     </span>
                   </div>
-                  <span className="text-[10px] font-bold text-slate-400">
-                    Live
-                  </span>
-                </div>
-
-                {/* Micro Preview Header with Badge Style Toggle */}
-                <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 px-0.5">
-                  <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 text-[11px]">
-                    <span>Label Preview (75×50)</span>
-                  </span>
-                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[10px]">
+                  <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[10px]">
                     <button
                       type="button"
                       onClick={() => setBadgeStyle("straight")}
@@ -3360,69 +3353,42 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-3xl w-full p-6 space-y-5 max-h-[95vh] overflow-y-auto">
               {/* Modal Controls Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <Printer
-                    size={18}
-                    className="text-[#18476A] dark:text-cyan-400"
-                  />
-                  <div>
-                    <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                      <span>
+              <div className="flex items-center justify-between gap-4 pb-3.5 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-[#18476A]/10 dark:bg-cyan-500/10 flex items-center justify-center shrink-0">
+                    <Printer
+                      size={20}
+                      className="text-[#18476A] dark:text-cyan-400"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-slate-900 dark:text-white truncate">
                         {effectiveSlips.length > 1
                           ? `Print ${effectiveSlips.length} Consignment Labels`
                           : "Consignment Label Slip"}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-md bg-[#18476A]/10 text-[#18476A] dark:bg-cyan-500/10 dark:text-cyan-300 text-[11px] font-mono font-bold">
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-md bg-[#18476A]/10 text-[#18476A] dark:bg-cyan-500/10 dark:text-cyan-300 text-[11px] font-mono font-bold shrink-0">
                         75mm × 50mm
                       </span>
-                    </h3>
-                    <p className="text-[11px] text-slate-400">
-                      Standard Thermal Sticker Roll (75mm × 50mm / 3″ × 2″)
+                    </div>
+                    <p className="text-xs text-slate-400 truncate mt-0.5">
+                      Standard Thermal Sticker Roll (3″ × 2″)
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {/* Badge Style Switcher */}
-                  <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold mr-1">
-                    <button
-                      type="button"
-                      onClick={() => setBadgeStyle("straight")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition cursor-pointer text-xs ${
-                        badgeStyle === "straight"
-                          ? "bg-white dark:bg-slate-900 text-[#18476A] dark:text-cyan-400 shadow-xs font-black"
-                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                      }`}
-                      title="Straight horizontal badge: 100% crisp, sharp, perfectly readable on thermal printers"
-                    >
-                      <Square size={13} />
-                      <span>Straight (Clean Print)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBadgeStyle("diagonal")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition cursor-pointer text-xs ${
-                        badgeStyle === "diagonal"
-                          ? "bg-white dark:bg-slate-900 text-[#18476A] dark:text-cyan-400 shadow-xs font-black"
-                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                      }`}
-                      title="Diagonal cross line in corner"
-                    >
-                      <Slash size={13} className="rotate-45" />
-                      <span>Diagonal / Cross</span>
-                    </button>
-                  </div>
 
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={executePrint}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#18476A] text-white text-xs font-bold hover:bg-[#123955] transition shadow-md cursor-pointer"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#18476A] text-white text-xs font-bold hover:bg-[#123955] transition shadow-md hover:shadow-lg active:scale-95 cursor-pointer whitespace-nowrap"
                   >
                     <Printer size={14} />
                     <span>
                       {effectiveSlips.length > 1
-                        ? `Print All ${effectiveSlips.length} Labels (75×50)`
-                        : "Print Label (75×50)"}
+                        ? `Print All (${effectiveSlips.length})`
+                        : "Print Label"}
                     </span>
                   </button>
                   <button
@@ -3432,9 +3398,61 @@ export function CreateCourierView({ permissions }: CreateCourierViewProps) {
                       setSlipsToPrint([]);
                       setSlipToPrint(null);
                     }}
-                    className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                    title="Close"
                   >
                     <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Dedicated Print Layout Options Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="font-bold text-slate-700 dark:text-slate-300">
+                    Badge Style:
+                  </span>
+                  <span className="text-[11px] text-slate-400 hidden sm:inline">
+                    {badgeStyle === "straight"
+                      ? "Straight horizontal box (Recommended: crisp & clear on thermal rolls)"
+                      : "Diagonal cross line in corner"}
+                  </span>
+                </div>
+
+                <div className="inline-flex items-center p-1 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setBadgeStyle("straight")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                      badgeStyle === "straight"
+                        ? "bg-[#18476A] text-white shadow-xs font-black"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <Square size={13} strokeWidth={2.5} />
+                    <span>Straight (Clean Print)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBadgeStyle("diagonal")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                      badgeStyle === "diagonal"
+                        ? "bg-[#18476A] text-white shadow-xs font-black"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none">
+                      <line
+                        x1="2"
+                        y1="14"
+                        x2="14"
+                        y2="2"
+                        stroke="currentColor"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <span>Diagonal / Cross</span>
                   </button>
                 </div>
               </div>
